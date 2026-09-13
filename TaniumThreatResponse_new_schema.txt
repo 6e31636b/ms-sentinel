@@ -1,344 +1,74 @@
-TimeGenerated
-0
-System.DateTime
-datetime
 
-Timestamp_t
-1
-System.DateTime
-datetime
 
-MITRE_Techniques_s
-2
-System.String
-string
-
-Impact_Score_s
-3
-System.String
-string
-
-Alert_Id_g
-4
-System.String
-string
-
-Computer_Name_s
-5
-System.String
-string
-
-Computer_IP_s
-6
-System.String
-string
-
-Intel_Id_d
-7
-System.Double
-real
-
-Intel_Type_s
-8
-System.String
-string
-
-Intel_Name_s
-9
-System.String
-string
-
-Intel_Labels_s
-10
-System.String
-string
-
-EID
-11
-System.String
-string
-
-Link
-12
-System.String
-string
-
-IntelSource
-13
-System.String
-string
-
-Match_Details_json
-14
-System.String
-string
-
-Match_Details_intel_id_d
-15
-System.Double
-real
-
-Match_Details_config_id_d
-16
-System.Double
-real
-
-Match_Details_config_rev_id_d
-17
-System.Double
-real
-
-Match_Details_match_contexts_s
-18
-System.String
-string
-
-Match_Details_match_hash_s
-19
-System.String
-string
-
-Match_Details_match_type_s
-20
-System.String
-string
-
-Match_Details_match_source_s
-21
-System.String
-string
-
-Match_Details_match_version_d
-22
-System.Double
-real
-
-Match_Details_match_properties_file_size_s
-23
-System.String
-string
-
-Match_Details_match_properties_parent_recorder_table_id_s
-24
-System.String
-string
-
-Match_Details_match_properties_recorder_table_id_s
-25
-System.String
-string
-
-Match_Details_match_properties_pid_d
-26
-System.Double
-real
-
-Match_Details_match_properties_args_s
-27
-System.String
-string
-
-Match_Details_match_properties_file_md5_g
-28
-System.String
-string
-
-Match_Details_match_properties_file_sha1_s
-29
-System.String
-string
-
-Match_Details_match_properties_file_sha256_s
-30
-System.String
-string
-
-Match_Details_match_properties_file_fullpath_s
-31
-System.String
-string
-
-Match_Details_match_properties_name_s
-32
-System.String
-string
-
-Match_Details_match_properties_ppid_d
-33
-System.Double
-real
-
-Match_Details_match_properties_user_s
-34
-System.String
-string
-
-Match_Details_match_properties_parent_pid_d
-35
-System.Double
-real
-
-Match_Details_match_properties_parent_args_s
-36
-System.String
-string
-
-Match_Details_match_properties_parent_file_s
-37
-System.String
-string
-
-Match_Details_match_properties_parent_name_s
-38
-System.String
-string
-
-Match_Details_match_properties_parent_ppid_d
-39
-System.Double
-real
-
-Match_Details_match_properties_parent_user_s
-40
-System.String
-string
-
-Match_Details_match_properties_parent_parent_s
-41
-System.String
-string
-
-Match_Details_match_properties_parent_start_time_t
-42
-System.DateTime
-datetime
-
-Match_Details_match_properties_parent_recorder_unique_id_s
-43
-System.String
-string
-
-Match_Details_match_properties_start_time_t
-44
-System.DateTime
-datetime
-
-Match_Details_match_properties_recorder_unique_id_s
-45
-System.String
-string
-
-Match_Details_finding_whats_s
-46
-System.String
-string
-
-Match_Details_finding_domain_s
-47
-System.String
-string
-
-Match_Details_finding_hunt_id_s
-48
-System.String
-string
-
-Match_Details_finding_type_id_s
-49
-System.String
-string
-
-Match_Details_finding_intel_id_s
-50
-System.String
-string
-
-Match_Details_finding_last_seen_t
-51
-System.DateTime
-datetime
-
-Match_Details_finding_threat_id_s
-52
-System.String
-string
-
-Match_Details_finding_finding_id_s
-53
-System.String
-string
-
-Match_Details_finding_first_seen_t
-54
-System.DateTime
-datetime
-
-Match_Details_finding_description_s
-55
-System.String
-string
-
-Match_Details_finding_source_name_s
-56
-System.String
-string
-
-Match_Details_finding_system_info_os_s
-57
-System.String
-string
-
-Match_Details_finding_system_info_bits_d
-58
-System.Double
-real
-
-Match_Details_finding_system_info_platform_s
-59
-System.String
-string
-
-Match_Details_finding_system_info_patch_level_s
-60
-System.String
-string
-
-Match_Details_finding_system_info_build_number_s
-61
-System.String
-string
-
-Match_Details_finding_system_info_logged_on_user_s
-62
-System.String
-string
-
-Match_Details_finding_reporting_id_s
-63
-System.String
-string
-
-Match_Details_finding_artifact_artifact_hash_s
-64
-System.String
-string
-
-Match_Details_finding_artifact_instance_hash_s
-65
-System.String
-string
-
-Match_Details_finding_artifact_windows_defender_event
-66
-System.String
-string
-
-MatchDets_finding_artifact_WindowsDefenderEvent_timestamp_ms
-67
-System.String
-string
-
-_ResourceId
-70
-System.String
-string
+ColumnName	ColumnOrdinal	DataType	ColumnType
+TimeGenerated	0	System.DateTime	datetime
+Timestamp_t	1	System.DateTime	datetime
+MITRE_Techniques_s	2	System.String	string
+Impact_Score_s	3	System.String	string
+Alert_Id_g	4	System.String	string
+Computer_Name_s	5	System.String	string
+Computer_IP_s	6	System.String	string
+Intel_Id_d	7	System.Double	real
+Intel_Type_s	8	System.String	string
+Intel_Name_s	9	System.String	string
+Intel_Labels_s	10	System.String	string
+EID	11	System.String	string
+Link	12	System.String	string
+IntelSource	13	System.String	string
+Match_Details_json	14	System.String	string
+Match_Details_intel_id_d	15	System.Double	real
+Match_Details_config_id_d	16	System.Double	real
+Match_Details_config_rev_id_d	17	System.Double	real
+Match_Details_match_contexts_s	18	System.String	string
+Match_Details_match_hash_s	19	System.String	string
+Match_Details_match_type_s	20	System.String	string
+Match_Details_match_source_s	21	System.String	string
+Match_Details_match_version_d	22	System.Double	real
+Match_Details_match_properties_file_size_s	23	System.String	string
+Match_Details_match_properties_parent_recorder_table_id_s	24	System.String	string
+Match_Details_match_properties_recorder_table_id_s	25	System.String	string
+Match_Details_match_properties_pid_d	26	System.Double	real
+Match_Details_match_properties_args_s	27	System.String	string
+Match_Details_match_properties_file_md5_g	28	System.String	string
+Match_Details_match_properties_file_sha1_s	29	System.String	string
+Match_Details_match_properties_file_sha256_s	30	System.String	string
+Match_Details_match_properties_file_fullpath_s	31	System.String	string
+Match_Details_match_properties_name_s	32	System.String	string
+Match_Details_match_properties_ppid_d	33	System.Double	real
+Match_Details_match_properties_user_s	34	System.String	string
+Match_Details_match_properties_parent_pid_d	35	System.Double	real
+Match_Details_match_properties_parent_args_s	36	System.String	string
+Match_Details_match_properties_parent_file_s	37	System.String	string
+Match_Details_match_properties_parent_name_s	38	System.String	string
+Match_Details_match_properties_parent_ppid_d	39	System.Double	real
+Match_Details_match_properties_parent_user_s	40	System.String	string
+Match_Details_match_properties_parent_parent_s	41	System.String	string
+Match_Details_match_properties_parent_start_time_t	42	System.DateTime	datetime
+Match_Details_match_properties_parent_recorder_unique_id_s	43	System.String	string
+Match_Details_match_properties_start_time_t	44	System.DateTime	datetime
+Match_Details_match_properties_recorder_unique_id_s	45	System.String	string
+Match_Details_finding_whats_s	46	System.String	string
+Match_Details_finding_domain_s	47	System.String	string
+Match_Details_finding_hunt_id_s	48	System.String	string
+Match_Details_finding_type_id_s	49	System.String	string
+Match_Details_finding_intel_id_s	50	System.String	string
+Match_Details_finding_last_seen_t	51	System.DateTime	datetime
+Match_Details_finding_threat_id_s	52	System.String	string
+Match_Details_finding_finding_id_s	53	System.String	string
+Match_Details_finding_first_seen_t	54	System.DateTime	datetime
+Match_Details_finding_description_s	55	System.String	string
+Match_Details_finding_source_name_s	56	System.String	string
+Match_Details_finding_system_info_os_s	57	System.String	string
+Match_Details_finding_system_info_bits_d	58	System.Double	real
+Match_Details_finding_system_info_platform_s	59	System.String	string
+Match_Details_finding_system_info_patch_level_s	60	System.String	string
+Match_Details_finding_system_info_build_number_s	61	System.String	string
+Match_Details_finding_system_info_logged_on_user_s	62	System.String	string
+Match_Details_finding_reporting_id_s	63	System.String	string
+Match_Details_finding_artifact_artifact_hash_s	64	System.String	string
+Match_Details_finding_artifact_instance_hash_s	65	System.String	string
+Match_Details_finding_artifact_windows_defender_event	66	System.String	string
+MatchDets_finding_artifact_WindowsDefenderEvent_timestamp_ms	67	System.String	string
+TenantId	68	System.String	string
+Type	69	System.String	string
+_ResourceId	70	System.String	string
