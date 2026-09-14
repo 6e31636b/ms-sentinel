@@ -1,0 +1,4 @@
+az monitor log-analytics workspace table list \
+  -g <resource-group> --workspace-name <workspace> \
+  --query "[].{Table:name, Plan:plan, Interactive:retentionInDays, Total:totalRetentionInDays, Inherited:retentionInDaysAsDefault}" \
+  -o table
