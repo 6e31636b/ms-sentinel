@@ -1,0 +1,72 @@
+I traced every column your parser reads from the table. The parser touches exactly 11 columns:
+
+TimeGenerated, Alert_Id_g, Timestamp_t, Computer_Name_s, Computer_IP_s, Intel_Type_s, Intel_Name_s, Intel_Labels_s, Link_s, EID_d, Match_Details_s
+
+Everything else — all ~60 output fields — is derived inside the parser from todynamic(Match_Details_s), via md.match, md.finding, mv-expand match.contexts, finding.whats[0].artifact_activity.relevant_actions[0].target.*.
+
+Against the new schema:
+
+Parser needs	New schema	Status
+Alert_Id_g	Alert_Id_g (toguid(AlertId))	match
+Timestamp_t	Timestamp_t	match
+Computer_Name_s	Computer_Name_s	match
+Computer_IP_s	Computer_IP_s	match
+Intel_Type_s / Intel_Name_s / Intel_Labels_s	same	match
+Match_Details_s	Match_Details_json	renamed
+Link_s	Link	renamed
+EID_d (real)	EID (string)	renamed + retyped
+
+The critical one is fine. The DCR transform does extend j = parse_json(MatchDetails) then Match_Details_json = tostring(j) — that's the complete blob, same content your parser reads today. Nothing the parser digs into is lost.
+
+Note the ~60 exploded Match_Details_* columns are useless to your parser — and they're a strict subset anyway: the transform never extracts finding.whats, and flattens match.contexts to a single string rather than an array. Your parser is more capable than the vendor's flattening. You're paying ingestion for columns you won't query.
+
+Option A — adapt the parser (3 edits)
+
+Insert a normalization block right after the table reference, then replace the three references downstream:
+
+kusto
+TaniumThreatResponse_CL
+| extend
+    _MatchDetails = coalesce(tostring(column_ifexists("Match_Details_json","")),
+                             tostring(column_ifexists("Match_Details_s",""))),
+    _Link         = coalesce(tostring(column_ifexists("Link_s","")),
+                             tostring(column_ifexists("Link",""))),
+    _EID          = coalesce(column_ifexists("EID_d", real(null)),
+                             toreal(column_ifexists("EID","")))
+| where isnotempty(Alert_Id_g)
+| where intel_type_filter == "" or Intel_Type_s == intel_type_filter
+| extend md = todynamic(_MatchDetails)
+...
+
+Then in the summarize (your line ~174-175): Link_s = take_any(_Link), EID_d = take_any(_EID).
+
+column_ifexists is what lets one parser span both eras — during the overlap, old rows populate Match_Details_s and new rows populate Match_Details_json. Downstream rule output names stay identical, so no analytics rule changes.
+
+Option B — adapt the DCR instead (parser unchanged)
+
+Edit the deployed DCR's transformKql to emit your legacy names:
+
+Match_Details_s = tostring(j),
+Link_s = Link,
+EID_d = toreal(EID),
+
+Delete the ~60 Match_Details_* projections while you're in there. Parser works byte-for-byte unchanged, one column set, lower ingestion cost. Cost: you've diverged from the vendor transform, so the Tanium workbook (which presumably reads the exploded columns) won't work.
+
+The blocker I can't resolve for you
+
+Tanium's doc: unexpected columns cause Deploy to error, and you must delete them. Your prod table has five columns absent from the new schema: Match_Details_s, Link_s, EID_d, Intel_Source_s, Impact_Score_d — plus SourceSystem, MG, ManagementGroupName, Computer, RawData.
+
+If Deploy demands deleting them, deleting Match_Details_s destroys your historical Match Details data, and with it every retrospective hunt through the parser. You cannot have both.
+
+Good news: the two columns Tanium's doc names for deletion (Match_Details_finding_artifact_windows_defender_event_event_s, ..._timestamp_ms_s) are not in your prod table — you're on the older, flatter shape. So that specific step is a no-op here.
+
+Test it with the clone script: build a classic table from prod's 24-column schema in lab, then Deploy, and see whether it errors on Match_Details_s or just adds columns alongside. That single test picks your path.
+
+If it errors, Option B becomes strongly preferable — build/edit the DCR yourself, never run Deploy against the prod table, keep every column and all history.
+
+Not clear / can't confirm
+The parser images are phone photos; I read them as carefully as I could but can't guarantee character-level accuracy on regexes and extract() patterns. Verify my three edits against your actual saved function.
+I can't see the function's parameter declaration (intel_type_filter) — presumably above line 1.
+Whether Tanium's new connection sends MatchDetails with the same content as the old one. If the new connection's format step stringifies nested objects differently, or reproduces the "JSON Object" placeholder, the whole thing breaks regardless of column mapping. Capture a sample via File destination before cutover.
+Alert_Id_g = toguid(AlertId) — if any AlertId isn't GUID-shaped, toguid returns null and your where isnotempty(Alert_Id_g) silently drops the alert. Worth checking a sample.
+TimeGenerated = now() in the new transform is ingestion time. Your parser already uses AlertedOn = min(Timestamp_t) for event time, so this is probably harmless — but TimeGenerated = max(TimeGenerated) will shift meaning slightly.
