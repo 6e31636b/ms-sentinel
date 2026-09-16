@@ -1,0 +1,13 @@
+{
+  "type": 3,
+  "content": {
+    "version": "KqlItem/1.0",
+    "query": "{\"version\":\"ARMEndpoint/1.0\",\"data\":null,\"headers\":[],\"method\":\"GET\",\"path\":\"/subscriptions/61bc6f8f-954f-429a-b7cc-84dd4bedec10/resourceGroups/rg-sentinel-lab/providers/Microsoft.OperationalInsights/workspaces/law-sentinel-lab/providers/Microsoft.SecurityInsights/contentTemplates\",\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-03-01\"},{\"key\":\"$filter\",\"value\":\"properties/contentKind eq 'DataConnector'\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[?(/deprecat|legacy/i.test(@.properties.displayName))]\",\"columns\":[{\"path\":\"$.properties.displayName\",\"columnid\":\"Connector\"},{\"path\":\"$.properties.packageName\",\"columnid\":\"Solution\"},{\"path\":\"$.properties.version\",\"columnid\":\"Version\"},{\"path\":\"$.properties.support.tier\",\"columnid\":\"SupportTier\"}]}}]}",
+    "size": 0,
+    "title": "Deprecated / legacy connectors (client-side filter)",
+    "queryType": 12,
+    "visualization": "table",
+    "gridSettings": { "filter": true }
+  },
+  "name": "deprecated-jsonpath"
+}
