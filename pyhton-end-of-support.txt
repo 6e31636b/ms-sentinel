@@ -1,0 +1,8 @@
+resources
+| where type =~ 'microsoft.web/sites'
+| extend fx = tostring(properties.siteConfig.linuxFxVersion),
+         flex = strcat(properties.functionAppConfig.runtime.name, '|', properties.functionAppConfig.runtime.version)
+| extend stack = iff(isnotempty(fx), fx, flex)
+| where stack startswith 'python'
+| project subscriptionId, resourceGroup, name, kind, plan = tostring(properties.sku), stack
+| order by stack asc
