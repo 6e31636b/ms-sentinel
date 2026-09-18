@@ -6,3 +6,156 @@ resources
 | where stack startswith 'python'
 | project subscriptionId, resourceGroup, name, kind, plan = tostring(properties.sku), stack
 | order by stack asc
+
+
+
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "header",
+      "content": {
+        "json": "## Python on App Service and Azure Functions\nEvery web app and function app running Python in the selected subscriptions, with hosting plan, support status and upgrade path.\n\n**Sentinel connectors** (app setting `WEBSITE_RUN_FROM_PACKAGE` pointing to `aka.ms/sentinel-...`) shouldn't be upgraded in place. Move them to the connector's CCF version instead."
+      }
+    },
+    {
+      "type": 9,
+      "name": "parameters",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "ba3acb75-58fa-45f6-860c-a823bbe1af6e",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "type": 6,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| project value = id, label = name",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "defaultValue": "value::all",
+            "value": [
+              "value::all"
+            ],
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources"
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.web/sites'\n| extend fx = tostring(properties.siteConfig.linuxFxVersion),\n         flex = strcat(properties.functionAppConfig.runtime.name, '|', properties.functionAppConfig.runtime.version)\n| extend stack = iff(isnotempty(fx), fx, flex)\n| where stack startswith 'python'\n| extend PythonVersion = tostring(split(stack, '|')[1]), sku = tostring(properties.sku)\n| extend Minor = toint(split(PythonVersion, '.')[1])\n| extend Plan = case(sku =~ 'Dynamic', 'Linux Consumption',\n                     sku =~ 'FlexConsumption', 'Flex Consumption',\n                     sku =~ 'ElasticPremium', 'Elastic Premium',\n                     strcat('App Service (', sku, ')'))\n| summarize Apps = count() by PythonVersion, Minor\n| order by Minor asc\n| project PythonVersion, Apps",
+        "size": 0,
+        "title": "Apps by Python version",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "barchart"
+      },
+      "name": "chart-by-version",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.web/sites'\n| extend fx = tostring(properties.siteConfig.linuxFxVersion),\n         flex = strcat(properties.functionAppConfig.runtime.name, '|', properties.functionAppConfig.runtime.version)\n| extend stack = iff(isnotempty(fx), fx, flex)\n| where stack startswith 'python'\n| extend PythonVersion = tostring(split(stack, '|')[1]), sku = tostring(properties.sku)\n| extend Minor = toint(split(PythonVersion, '.')[1])\n| extend Plan = case(sku =~ 'Dynamic', 'Linux Consumption',\n                     sku =~ 'FlexConsumption', 'Flex Consumption',\n                     sku =~ 'ElasticPremium', 'Elastic Premium',\n                     strcat('App Service (', sku, ')'))\n| summarize Apps = count() by Plan\n| order by Apps desc",
+        "size": 0,
+        "title": "Apps by hosting plan",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "piechart"
+      },
+      "name": "chart-by-plan",
+      "customWidth": "50"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "resources\n| where type =~ 'microsoft.web/sites'\n| extend fx = tostring(properties.siteConfig.linuxFxVersion),\n         flex = strcat(properties.functionAppConfig.runtime.name, '|', properties.functionAppConfig.runtime.version)\n| extend stack = iff(isnotempty(fx), fx, flex)\n| where stack startswith 'python'\n| extend PythonVersion = tostring(split(stack, '|')[1]), sku = tostring(properties.sku)\n| extend Minor = toint(split(PythonVersion, '.')[1])\n| extend Plan = case(sku =~ 'Dynamic', 'Linux Consumption',\n                     sku =~ 'FlexConsumption', 'Flex Consumption',\n                     sku =~ 'ElasticPremium', 'Elastic Premium',\n                     strcat('App Service (', sku, ')'))\n| extend Status = case(Minor < 10, 'Out of support',\n                       Minor == 10, 'Support ends Oct 2026',\n                       Minor == 11, 'Support ends Oct 2027',\n                       'Supported'),\n         UpgradePath = case(sku =~ 'Dynamic', 'New Flex Consumption app (3.12 is the max on Linux Consumption)',\n                            sku =~ 'FlexConsumption', 'Change version in place',\n                            'Change version in place, ideally via a staging slot')\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| order by Minor asc, Subscription asc, name asc\n| project App = id, Subscription, ResourceGroup = resourceGroup, Kind = kind, Plan, PythonVersion, Status, UpgradePath",
+        "size": 0,
+        "title": "Python apps",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "visualization": "table",
+        "showRefreshButton": true,
+        "showExportToExcel": true,
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Status",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Out of support",
+                    "representation": "redBright",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Support ends Oct 2026",
+                    "representation": "orange",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "==",
+                    "thresholdValue": "Support ends Oct 2027",
+                    "representation": "yellow",
+                    "text": "{0}{1}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "green",
+                    "text": "{0}{1}"
+                  }
+                ]
+              }
+            }
+          ],
+          "rowLimit": 10000,
+          "filter": true
+        }
+      },
+      "name": "grid-apps"
+    },
+    {
+      "type": 1,
+      "name": "footnote",
+      "content": {
+        "style": "info",
+        "json": "Resource Graph doesn't include app settings, so the `FUNCTIONS_EXTENSION_VERSION` (~3) check and the Sentinel package check still need `az functionapp config appsettings list`."
+      }
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
