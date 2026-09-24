@@ -192,75 +192,74 @@ Once you know the cause, if it turns out to be benign Group Policy traffic, the 
 
 
 #2 
-
-1. Name the GPOs and check whether they keep changing. Run this on a DC, then run it again 30–60 minutes later:
-
-powershell
-$guids = 'FEF166EC-DD2C-4398-AFB4-EDFD99828835','3C8BADF5-6CCB-4A47-8FAF-12E3155464F8'
-$dcs   = (Get-ADDomainController -Filter *).HostName
-$guids | ForEach-Object { $g = $_
-  $dcs | ForEach-Object {
-    $p = Get-GPO -Guid $g -Server $_
-    [pscustomobject]@{ GPO = $p.DisplayName; DC = $_; Modified = $p.ModificationTime
-      Computer = "$($p.Computer.DSVersion)/$($p.Computer.SysvolVersion)"
-      User     = "$($p.User.DSVersion)/$($p.User.SysvolVersion)" } }
-} | Format-Table -AutoSize
-
-# Recently changed files inside the two GPO folders, plus full settings reports
-$dom = $env:USERDNSDOMAIN
-$guids | ForEach-Object { Get-ChildItem "\\$dom\SYSVOL\$dom\Policies\{$_}" -Recurse -File } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 25 LastWriteTime, Length, FullName
-$guids | ForEach-Object { Get-GPOReport -Guid $_ -ReportType Html -Path "$env:TEMP\$_.html" }
-Version numbers climbing between runs: something keeps rewriting the GPO, so every client downloads it in full on every refresh.
-Different versions on different DCs: there's a replication problem.
-
-2. See which files inside those GPOs are being read.
+1. When exactly did it start?
 
 kql
-let spikeStart = datetime(2026-09-17 00:00);
+SecurityEvent
+| where TimeGenerated between (datetime(2026-09-15) .. datetime(2026-09-19))
+| where EventID == 5145
+| where RelativeTargetName has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| extend Gpo = toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, RelativeTargetName))
+| summarize Events = count() by bin(TimeGenerated, 15m), Gpo
+| render timechart
+
+This gives you the 15-minute slot where the jump happened. Look for a change around that time in the next queries.
+
+2. What are these GPOs called, and who changed them? Defender for Identity records GPO creations, setting changes and renames, including the GPO's name and the settings that changed: 
+kqlsearch
+kqlsearch
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+IdentityDirectoryEvents
+| where Timestamp > ago(30d)
+| where ActionType startswith "Group Policy"
+| where tostring(AdditionalFields) has_any (gpos)
+| extend Info = parse_json(AdditionalFields)
+| project Timestamp, ActionType, GroupPolicyName = tostring(Info.GroupPolicyName),
+          AccountName, AccountUpn, MachinePolicies = tostring(Info.MachinePolicies),
+          UserPolicies = tostring(Info.UserPolicies)
+| order by Timestamp asc
+
+If that comes back empty, the same history is in the DCs' own logs, as long as your DCR collects event 5136:
+
+kql
 let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
 SecurityEvent
-| where TimeGenerated between ((spikeStart - 7d) .. (spikeStart + 7d))
-| where EventID == 5145 and RelativeTargetName has_any (gpos)
-| extend Gpo = toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, RelativeTargetName)),
-         SubPath = extract(@"\}(.*)$", 1, RelativeTargetName)
-| summarize Before = countif(TimeGenerated < spikeStart), After = countif(TimeGenerated >= spikeStart),
-            SourcesBefore = dcountif(IpAddress, TimeGenerated < spikeStart),
-            SourcesAfter = dcountif(IpAddress, TimeGenerated >= spikeStart),
-            PctMachineAccts = round(100.0 * countif(SubjectUserName endswith "$") / count(), 0)
-    by Gpo, SubPath
-| extend Ratio = round(1.0 * After / Before, 1)
-| top 30 by After desc
+| where TimeGenerated > ago(30d)
+| where EventID in (5136, 5137)
+| where EventData has_any (gpos)
+| extend Attribute = extract(@"Name=""AttributeLDAPDisplayName"">([^<]*)<", 1, EventData),
+         Value     = extract(@"Name=""AttributeValue"">([^<]*)<", 1, EventData)
+| project TimeGenerated, SubjectUserName, EventID, Attribute, Value
+| order by TimeGenerated asc
 
 How to read it:
 
-gpt.ini up about 12x, with the same number of sources: those machines are refreshing policy much more often. Check gpupdate.exe runs per day in DeviceProcessEvents, and what launches them.
-gpt.ini roughly flat, but Registry.pol, GptTmpl.inf or Preferences XML files way up: clients are reprocessing the whole GPO every cycle. This matches the version churn from step 1, or a "Process even if the Group Policy objects have not changed" setting.
-One script, executable or file dominating: something runs or copies it repeatedly, usually a Group Policy Preferences scheduled task or Files item.
-Rows with Before = 0: content was added to the GPO around the spike.
+versionNumber changing every few minutes or hours: something keeps rewriting the GPO, so every client re-downloads all of it at every refresh.
+gPCMachineExtensionNames changed: a new type of setting was added. {AADCED64-746C-4633-A97C-D61349046527} is scheduled tasks; {7150F9BF-48AD-4DA4-A49C-29EF4A8369BA} is files.
 
-3. Find the client-side trigger in MDE. These are two separate queries; run them one at a time.
+3. What was written into the GPO folders? This only returns data if your DCs, or the admin machine that edited the GPO, run MDE:
 
 kql
-// A: anything executing from inside those GPO folders
-DeviceProcessEvents
-| where Timestamp > ago(21d)
-| where ProcessCommandLine has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
-| summarize Runs = count(), Devices = dcount(DeviceId), FirstSeen = min(Timestamp)
-    by FileName, InitiatingProcessFileName, ProcessCommandLine
-| order by Runs desc
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceFileEvents
+| where Timestamp > ago(30d)
+| where FolderPath has_any (gpos)
+| summarize Writes = count(), First = min(Timestamp), Last = max(Timestamp),
+            Accounts = make_set(coalesce(RequestAccountName, InitiatingProcessAccountName), 5),
+            Processes = make_set(InitiatingProcessFileName, 5), Devices = make_set(DeviceName, 5)
+    by FileName, ActionType
+| order by Last desc
 
-// B: scheduled tasks created or updated on many devices around the spike
-DeviceEvents
-| where Timestamp between (datetime(2026-09-15) .. datetime(2026-09-19))
-| where ActionType in ("ScheduledTaskCreated", "ScheduledTaskUpdated")
-| extend TaskName = tostring(parse_json(AdditionalFields).TaskName)
-| summarize Devices = dcount(DeviceId), FirstSeen = min(Timestamp) by TaskName, ActionType
-| where Devices > 20
-| order by Devices desc
+How to read it:
 
-A task that appeared on hundreds of devices around the 17th, or a process running from inside those GPO folders every few minutes, is almost certainly the source. You can also filter the IP-to-device query from my last message to these two GUIDs to see which OS builds the readers run.
+gpt.ini rewritten over and over: confirms the GPO keeps being rewritten.
+A file first seen around the 17th (ScheduledTasks.xml, Files.xml, a script or executable): that's the change itself, and Accounts shows who made it.
+Rows from DFSRs.exe: just replication between DCs.
 
-Sanity check on your current result: every domain member reads the Default Domain Policy ({31B2F340-016D-11D2-945F-00C04FB984F9}) on every refresh. If its row is roughly flat, machines aren't refreshing more often overall, so the cause is inside these two GPOs.
+After these, run the file-breakdown query and the two MDE queries from my last message. They show which files clients are reading and which process on the clients is reading them.
 
-If the volume is hurting your bill: once you've confirmed the change is legitimate, a DCR transformation that drops successful SYSVOL reads for just these two GUIDs is a safe, reversible stopgap.
+Quick check in the query you already ran: add | where Target =~ "{31B2F340-016D-11D2-945F-00C04FB984F9}" right after the extend Target line. That's the Default Domain Policy, which every machine reads on every refresh. If its count is flat, clients aren't refreshing more often, and the problem is inside these two GPOs.
+
+If none of the history queries return anything, you don't need DC access to get the GPO names. Any domain user can read them in GPMC, so your AD team can tell you in seconds.
