@@ -342,3 +342,65 @@ New .exe or .ps1 files: Tenable was upgraded.
 audit.csv or GptTmpl.inf changed: this GPO also sets your DCs' audit and security policy. Ask the Tenable owner whether it's what turned on Detailed File Share auditing in the first place.
 
 Then: take the results of steps 1–3 to whoever owns Tenable. They point to the fix: an EDR exclusion for the listener, reverting the IoA config change, or a Tenable support case. If it turns out to be expected volume, drop 5145 events for these two GPO paths with a DCR transformation so you stop paying to ingest Tenable's own traffic.
+
+
+
+
+
+
+What's causing it
+
+Since September 16, every domain controller has been reading the Tenable Identity Exposure IoA GPO folders in its own SYSVOL about 5 times per second, per path, nonstop. That accounts for the whole spike: roughly 25+ events per second per DC, across 22 DCs, is the ~300M extra events a week.
+
+It started the same day the Tenable IoA listener was relaunched on all 22 DCs. It's not clients, not Tenable's platform account, not RC4, and MDE isn't interfering.
+
+The evidence from your screenshots
+
+Who is reading: every top row is a DC's own computer account (ALPDUDCSP002$, ALPPRGADS1VP$, ALPAWSADS2VP$, ALPOLTADS8VP$ and so on). Most come from ::1, which means the DC is reading its own SYSVOL. None of the top rows are svc_tenablead or workstations.
+When it started: with Sep 16 as the cutoff, those DCs had zero reads of these paths the week before, apart from normal Group Policy touching ScheduledTasks.xml about 90 times a week. The week after, they had about 3 million reads per path. The earlier "×12" understated this because Sep 16 fell into the "before" week.
+What it looks like: \MACHINE, \USER, Preferences\Groups, ScheduledTasks.xml and GptTmpl.inf all have the same count. Something is walking the entire GPO folder tree in a loop. Normal Group Policy processing doesn't do that, and it would hit the Default Domain Controllers Policy just as hard, which isn't among your top growers.
+The trigger: Register-TenableADEventsListener.exe was launched on 22 DCs on Sep 16, compared with 3 on Sep 9. Tenable runs this listener from the IOA folder inside that same GPO in SYSVOL, and it's meant to run only once per DC. Two days earlier, on Sep 14, svc_tenablead wrote a TenableADEventsListener… file into that GPO folder. It's most likely the listener's configuration file, which Tenable's service account has write access to.
+What's ruled out:
+There are no AV, ASR or AppControl events against the listener. The hits in Image 1 are Nessus agents and the Tenable relay, which are unrelated to this. The ASR LSASS event on Tenable.Relay.exe is worth a separate look, though.
+The Semperis processes in Image 4 are its Forest Recovery agent taking its usual ~24-a-day GPO backups, which were already running before the 16th.
+
+One query to confirm it per DC
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+let t1 = datetime(2026-09-15); let t2 = datetime(2026-09-18);
+let flood = SecurityEvent
+    | where TimeGenerated between (t1 .. t2)
+    | where EventID == 5145 and RelativeTargetName has_any (gpos)
+    | summarize Events = count() by DC = toupper(trim_end(@"\$", SubjectUserName)), Slot = bin(TimeGenerated, 5m)
+    | where Events > 500
+    | summarize FloodStart = min(Slot) by DC;
+let listener = DeviceProcessEvents
+    | where Timestamp between (t1 .. t2) and FileName startswith "Register-TenableAD"
+    | summarize ListenerStart = min(Timestamp) by DC = toupper(tostring(split(DeviceName, ".")[0]));
+let boots = SecurityEvent
+    | where TimeGenerated between (t1 .. t2) and EventID == 4608
+    | summarize BootedAt = min(TimeGenerated) by DC = toupper(tostring(split(Computer, ".")[0]));
+flood
+| join kind=leftouter listener on DC
+| join kind=leftouter boots on DC
+| project DC, BootedAt, ListenerStart, FloodStart
+| order by FloodStart asc
+
+How to read it:
+
+ListenerStart and FloodStart within minutes of each other on every DC: the listener restart started the loop.
+BootedAt at the same time as well: the DCs rebooted, probably for patching. The listener is still the prime suspect, but Tenable needs to know it misbehaves after that reboot or update.
+
+Who does what
+
+Tenable team (the owner): find out what changed on Sep 14–16 (config push, IoA enablement, listener version), and why the listener's GPO folder is being rescanned about 5 times a second on every DC. They should open a case with Tenable using this data.
+AD team (proof on the box): on one DC, stop the TenableADTask_* listener for 10 minutes, or run Process Monitor filtered on the GPO path. If that DC's 5145 rate drops to near zero, it's proven. You can watch the rate from your side with this:
+kql
+SecurityEvent
+| where TimeGenerated > ago(2h) and EventID == 5145
+| where RelativeTargetName has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| where SubjectUserName =~ "ALPDUDCSP002$"   // the DC being tested
+| summarize count() by bin(TimeGenerated, 1m)
+| render timechart
+You: once it's proven, drop 5145 events for those two GPO paths with a DCR transformation until Tenable ships a fix.
