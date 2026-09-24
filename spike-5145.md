@@ -188,3 +188,79 @@ Concentration on one OS version or build revision that went out around September
 Next step: drop the last summarize to get per-device rows, then open the top devices' timelines around the spike start and look for new scheduled tasks, services or software.
 
 Once you know the cause, if it turns out to be benign Group Policy traffic, the cheapest fix is to put DCs back to Failure-only for this subcategory. Alternatively, drop successful SYSVOL reads by computer accounts in the DCR, since they carry very little detection value.
+
+
+
+#2 
+
+1. Name the GPOs and check whether they keep changing. Run this on a DC, then run it again 30–60 minutes later:
+
+powershell
+$guids = 'FEF166EC-DD2C-4398-AFB4-EDFD99828835','3C8BADF5-6CCB-4A47-8FAF-12E3155464F8'
+$dcs   = (Get-ADDomainController -Filter *).HostName
+$guids | ForEach-Object { $g = $_
+  $dcs | ForEach-Object {
+    $p = Get-GPO -Guid $g -Server $_
+    [pscustomobject]@{ GPO = $p.DisplayName; DC = $_; Modified = $p.ModificationTime
+      Computer = "$($p.Computer.DSVersion)/$($p.Computer.SysvolVersion)"
+      User     = "$($p.User.DSVersion)/$($p.User.SysvolVersion)" } }
+} | Format-Table -AutoSize
+
+# Recently changed files inside the two GPO folders, plus full settings reports
+$dom = $env:USERDNSDOMAIN
+$guids | ForEach-Object { Get-ChildItem "\\$dom\SYSVOL\$dom\Policies\{$_}" -Recurse -File } |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 25 LastWriteTime, Length, FullName
+$guids | ForEach-Object { Get-GPOReport -Guid $_ -ReportType Html -Path "$env:TEMP\$_.html" }
+Version numbers climbing between runs: something keeps rewriting the GPO, so every client downloads it in full on every refresh.
+Different versions on different DCs: there's a replication problem.
+
+2. See which files inside those GPOs are being read.
+
+kql
+let spikeStart = datetime(2026-09-17 00:00);
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+SecurityEvent
+| where TimeGenerated between ((spikeStart - 7d) .. (spikeStart + 7d))
+| where EventID == 5145 and RelativeTargetName has_any (gpos)
+| extend Gpo = toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, RelativeTargetName)),
+         SubPath = extract(@"\}(.*)$", 1, RelativeTargetName)
+| summarize Before = countif(TimeGenerated < spikeStart), After = countif(TimeGenerated >= spikeStart),
+            SourcesBefore = dcountif(IpAddress, TimeGenerated < spikeStart),
+            SourcesAfter = dcountif(IpAddress, TimeGenerated >= spikeStart),
+            PctMachineAccts = round(100.0 * countif(SubjectUserName endswith "$") / count(), 0)
+    by Gpo, SubPath
+| extend Ratio = round(1.0 * After / Before, 1)
+| top 30 by After desc
+
+How to read it:
+
+gpt.ini up about 12x, with the same number of sources: those machines are refreshing policy much more often. Check gpupdate.exe runs per day in DeviceProcessEvents, and what launches them.
+gpt.ini roughly flat, but Registry.pol, GptTmpl.inf or Preferences XML files way up: clients are reprocessing the whole GPO every cycle. This matches the version churn from step 1, or a "Process even if the Group Policy objects have not changed" setting.
+One script, executable or file dominating: something runs or copies it repeatedly, usually a Group Policy Preferences scheduled task or Files item.
+Rows with Before = 0: content was added to the GPO around the spike.
+
+3. Find the client-side trigger in MDE. These are two separate queries; run them one at a time.
+
+kql
+// A: anything executing from inside those GPO folders
+DeviceProcessEvents
+| where Timestamp > ago(21d)
+| where ProcessCommandLine has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| summarize Runs = count(), Devices = dcount(DeviceId), FirstSeen = min(Timestamp)
+    by FileName, InitiatingProcessFileName, ProcessCommandLine
+| order by Runs desc
+
+// B: scheduled tasks created or updated on many devices around the spike
+DeviceEvents
+| where Timestamp between (datetime(2026-09-15) .. datetime(2026-09-19))
+| where ActionType in ("ScheduledTaskCreated", "ScheduledTaskUpdated")
+| extend TaskName = tostring(parse_json(AdditionalFields).TaskName)
+| summarize Devices = dcount(DeviceId), FirstSeen = min(Timestamp) by TaskName, ActionType
+| where Devices > 20
+| order by Devices desc
+
+A task that appeared on hundreds of devices around the 17th, or a process running from inside those GPO folders every few minutes, is almost certainly the source. You can also filter the IP-to-device query from my last message to these two GUIDs to see which OS builds the readers run.
+
+Sanity check on your current result: every domain member reads the Default Domain Policy ({31B2F340-016D-11D2-945F-00C04FB984F9}) on every refresh. If its row is roughly flat, machines aren't refreshing more often overall, so the cause is inside these two GPOs.
+
+If the volume is hurting your bill: once you've confirmed the change is legitimate, a DCR transformation that drops successful SYSVOL reads for just these two GUIDs is a safe, reversible stopgap.
