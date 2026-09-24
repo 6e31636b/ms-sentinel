@@ -489,3 +489,53 @@ Why it loops: the logs can't show the internal reason. The likely explanation is
 Who's not responsible: your clients, attackers, RC4, MDE, and Semperis, which is only taking its normal daily backups.
 
 Also ask Tenable: the Tenable GPO carries audit settings of its own (audit.csv), so ask whether it's also what turned on file-share auditing on your DCs in the first place.
+
+
+
+
+
+
+
+
+
+The two Tenable IoA GPO folders in SYSVOL, including everything under them:
+
+\\<yourdomain>\SYSVOL\<yourdomain>\Policies\{FEF166EC-DD2C-4398-AFB4-EDFD99828835}\
+\\<yourdomain>\SYSVOL\<yourdomain>\Policies\{3C8BADF5-6CCB-4A47-8FAF-12E3155464F8}\
+
+In a 5145 event, that means ShareName is \\*\SYSVOL and RelativeTargetName contains one of those two GUIDs. It covers every subpath you saw: \MACHINE, \USER, Preferences\Groups, ScheduledTasks.xml, GptTmpl.inf and so on.
+
+Only drop the flood itself: reads by DC computer accounts (names ending in $). Keep anything else that touches those folders, such as svc_tenablead or any user account. Someone other than a DC modifying the Tenable GPO is exactly what you'd still want to see.
+
+1. Preview what the filter would remove (run in Sentinel first):
+
+kql
+SecurityEvent
+| where TimeGenerated > ago(1d) and EventID == 5145
+| extend Drop = SubjectUserName endswith "$"
+    and RelativeTargetName has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| summarize Events = count() by Drop
+
+2. The transformation. Add this to the DCR that collects Security events from your DCs:
+
+kql
+source
+| where EventID != 5145
+    or SubjectUserName !endswith '$'
+    or (RelativeTargetName !contains 'FEF166EC-DD2C-4398-AFB4-EDFD99828835'
+        and RelativeTargetName !contains '3C8BADF5-6CCB-4A47-8FAF-12E3155464F8')
+
+It keeps every row except 5145 events from DC computer accounts on those two GUIDs.
+
+How to add it
+
+Where it goes: transformations sit in the transformKql property of the DCR's dataFlows section, on the Microsoft-SecurityEvent stream.
+How to edit it: GET the DCR JSON through the REST API, add the property, and PUT it back with api-version 2022-06-01.
+Formatting: in the JSON, the query must be on a single line:
+json
+"transformKql": "source | where EventID != 5145 or SubjectUserName !endswith '$' or (RelativeTargetName !contains 'FEF166EC-DD2C-4398-AFB4-EDFD99828835' and RelativeTargetName !contains '3C8BADF5-6CCB-4A47-8FAF-12E3155464F8')"
+If the dataFlow already has a transformKql: add this as an extra | where rather than replacing it.
+Cost: you won't pay a data-processing charge for filtering. That charge applies only in workspaces without Sentinel.
+Nothing else changes: this only affects what lands in Sentinel. The DCs' local Security logs and Tenable's listener are untouched.
+
+A day after deploying, re-run the preview query. The Drop = true count should be close to zero, while the rest of your 5145 events keep flowing.
