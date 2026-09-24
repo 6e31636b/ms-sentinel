@@ -404,3 +404,88 @@ SecurityEvent
 | summarize count() by bin(TimeGenerated, 1m)
 | render timechart
 You: once it's proven, drop 5145 events for those two GPO paths with a DCR transformation until Tenable ships a fix.
+
+
+
+
+Timing check: when did each DC start flooding, and did it reboot? This one uses Sentinel data only.
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+let flood = SecurityEvent
+    | where TimeGenerated between (datetime(2026-09-15) .. datetime(2026-09-18))
+    | where EventID == 5145 and RelativeTargetName has_any (gpos)
+    | summarize Events = count() by DC = toupper(SubjectUserName), Slot = bin(TimeGenerated, 15m)
+    | where Events > 1000
+    | summarize FloodStart = min(Slot) by DC;
+let boots = SecurityEvent
+    | where TimeGenerated between (datetime(2026-09-15) .. datetime(2026-09-18)) and EventID == 4608
+    | summarize BootedAt = min(TimeGenerated) by DC = strcat(toupper(tostring(split(Computer, ".")[0])), "$");
+flood
+| join kind=leftouter boots on DC
+| project DC, BootedAt, FloodStart
+| order by FloodStart asc
+
+Then, in Defender data only, find when the Tenable listener started on each DC and what launched it:
+
+kql
+DeviceProcessEvents
+| where Timestamp between (datetime(2026-09-15) .. datetime(2026-09-18))
+| where FileName startswith "Register-TenableAD"
+| project Timestamp, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by Timestamp asc
+
+How to read them together:
+
+Listener start and FloodStart within about 15 minutes of each other on each DC: the restart kicked off the flood.
+A BootedAt at the same time: the DCs were rebooted, for example for patching.
+No BootedAt: the restart came from a Tenable redeploy or a task restart, not a reboot.
+
+2. Which GPOs are affected. Sep 16 is the split point.
+
+kql
+let spike = datetime(2026-09-16);
+SecurityEvent
+| where TimeGenerated between (datetime(2026-09-09) .. datetime(2026-09-23))
+| where EventID == 5145 and ShareName endswith "SYSVOL"
+| extend Gpo = toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, RelativeTargetName))
+| where isnotempty(Gpo)
+| summarize BeforePerDay = round(countif(TimeGenerated < spike) / 7.0),
+            AfterPerDay  = round(countif(TimeGenerated >= spike) / 7.0),
+            ReadersAfter = dcountif(SubjectUserName, TimeGenerated >= spike)
+    by Gpo
+| extend Increase = AfterPerDay - BeforePerDay
+| top 10 by Increase desc
+
+ReadersAfter is the number of distinct accounts reading each GPO. Normal GPOs are read by thousands of computers. The two Tenable GPOs should show only about 22 readers, your DCs.
+
+3. Proof that these two GPOs are Tenable's. This uses Defender data. It shows Tenable's listener program running from inside each GPO folder, and the Tenable files stored there.
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+union
+    (DeviceProcessEvents
+     | where Timestamp > ago(30d) and FolderPath has_any (gpos)
+     | extend Evidence = "Program running from inside the GPO folder"),
+    (DeviceFileEvents
+     | where Timestamp > ago(30d) and FolderPath has_any (gpos) and FileName contains "Tenable"
+     | extend Evidence = "Tenable file stored in the GPO folder")
+| extend Gpo = toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, FolderPath))
+| summarize Devices = dcount(DeviceId), First = min(Timestamp), Last = max(Timestamp),
+            SamplePath = take_any(FolderPath)
+    by Gpo, Evidence, FileName
+| order by Gpo asc, Evidence asc
+
+You should see Register-TenableADEventsListener.exe and TenableADEventsListener… files under both GUIDs, on your DCs.
+
+What happened, in plain terms
+
+Aug 26–27, Tenable was deployed. Whoever runs Tenable Identity Exposure installed its "Indicators of Attack" module. That created these two GPOs, probably one per domain, linked to your Domain Controllers. Each GPO puts a scheduled task on every DC. The task starts Tenable's listener program directly from the GPO's folder in SYSVOL. The listener collects security events on each DC and writes them into a file in that same folder, where Tenable picks them up.
+Sep 14, Tenable changed something. Tenable's service account (svc_tenablead) wrote a new listener file into that folder, most likely a new configuration or an update pushed from the Tenable side.
+Sep 16, the listener restarted on all 22 DCs. From then on, every DC has been re-reading the Tenable GPO folder in its own SYSVOL about 5 times per second, nonstop.
+Why it shows up in Sentinel: your DCs audit every file-share access. Each of those reads becomes event 5145, and the Azure Monitor Agent ships them all to Sentinel. That's hundreds of millions of extra events a week.
+Why it loops: the logs can't show the internal reason. The likely explanation is that the new listener version or configuration rescans its folder whenever the folder changes. That folder changes constantly, because every DC keeps writing its event file into it. Only Tenable can confirm this.
+
+Who's not responsible: your clients, attackers, RC4, MDE, and Semperis, which is only taking its normal daily backups.
+
+Also ask Tenable: the Tenable GPO carries audit settings of its own (audit.csv), so ask whether it's also what turned on file-share auditing on your DCs in the first place.
