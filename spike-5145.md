@@ -263,3 +263,82 @@ After these, run the file-breakdown query and the two MDE queries from my last m
 Quick check in the query you already ran: add | where Target =~ "{31B2F340-016D-11D2-945F-00C04FB984F9}" right after the extend Target line. That's the Default Domain Policy, which every machine reads on every refresh. If its count is flat, clients aren't refreshing more often, and the problem is inside these two GPOs.
 
 If none of the history queries return anything, you don't need DC access to get the GPO names. Any domain user can read them in GPMC, so your AD team can tell you in seconds.
+
+
+
+
+
+What the two results show
+
+The two GPOs belong to Tenable Identity Exposure (formerly Tenable.ad), its Indicators of Attack (IoA) module. The folders contain ScheduledTasks.xml, a Register-TenableA… file, and files that look like they're named after your DCs, which dfsrs.exe keeps replicating. That matches how Tenable IoA works: the GPO pushes a scheduled task to the DCs, and that task launches Register-TenableADEventsListener.exe from the GPO's \Machine\IOA\ folder in SYSVOL. Each DC then periodically writes the events it collects to its own file in SYSVOL, and DFS replicates that file to the other DCs.
+Why two GPOs: the IoA install script is run once per AD domain, so you probably have one per domain (or an old and a new deployment).
+The GPOs predate the spike. Their files first appear Aug 26 and the visible edits are Aug 27, three weeks before it started. Scroll to rows 9–16 of the 5136 result: if nothing there is dated around Sept 16–17, nobody edited the GPO when the spike began.
+
+Bottom line: your clients and normal Group Policy processing aren't the cause. Tenable's IoA mechanism has been hitting SYSVOL on your DCs about 12× harder since the 17th. The steps below find what changed on the Tenable side that day.
+
+Step 1: Who is hitting the Tenable folders, and which files?
+
+kql
+let spikeStart = datetime(2026-09-17 00:00);
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+SecurityEvent
+| where TimeGenerated between ((spikeStart - 7d) .. (spikeStart + 7d))
+| where EventID == 5145 and RelativeTargetName has_any (gpos)
+| extend File = extract(@"\}(.*)$", 1, RelativeTargetName)
+| summarize Before = countif(TimeGenerated < spikeStart), After = countif(TimeGenerated >= spikeStart)
+    by SubjectUserName, IpAddress, File
+| extend Growth = After - Before
+| top 20 by Growth desc
+
+How to read the top rows:
+
+Accounts ending in $, with your DCs' IPs: the Tenable listeners on the DCs are generating the traffic. Go to step 2.
+The Tenable service account, from one or two IPs: Tenable's own platform is reading much more than before. Go to step 3, then to whoever owns Tenable.
+The .exe or the .json config file at the top: something is being relaunched or re-read constantly.
+The per-DC event files at the top: far more event data is being written and collected.
+
+Step 2: Is the listener restarting over and over? Your DCs are onboarded to MDE (the dfsrs.exe rows in your file query came from them), so you can check directly:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceProcessEvents
+| where Timestamp > ago(21d)
+| where FileName startswith "Register-TenableAD" or ProcessCommandLine has_any (gpos)
+| summarize Launches = count(), DCs = dcount(DeviceId) by Day = bin(Timestamp, 1d), FileName
+| extend PerDC = round(1.0 * Launches / DCs, 1)
+| order by FileName asc, Day asc
+
+Tenable says the listener should run only once per DC, so PerDC should stay roughly flat. If it jumps starting on the 17th, the listener is in a restart loop.
+
+Tenable's troubleshooting guide lists EDR or antivirus blocking the listener as a known problem. One candidate that lines up with the date: the Defender Antivirus platform update 4.18.26080.4 was released on September 17. To see whether MDE has been acting on Tenable's files or processes:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceEvents
+| where Timestamp > datetime(2026-09-14)
+| where ActionType matches regex "^(Antivirus|Asr|AppControl|ExploitGuard|Tampering)"
+| extend Blob = strcat(FileName, " ", FolderPath, " ", InitiatingProcessCommandLine, " ", ProcessCommandLine)
+| where Blob contains "Tenable" or Blob has_any (gpos)
+| summarize Events = count(), DCs = dcount(DeviceId), First = min(Timestamp) by ActionType, FileName
+| order by First asc
+
+Step 3: Did Tenable's config, version or audit settings change around the 17th?
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceFileEvents
+| where Timestamp between (datetime(2026-09-14) .. datetime(2026-09-19))
+| where FolderPath has_any (gpos)
+| where FileName has_any (".json", ".exe", ".ps1", ".xml", ".csv", ".inf")
+| summarize Events = count(), Who = make_set(coalesce(RequestAccountName, InitiatingProcessAccountName), 5),
+            Processes = make_set(InitiatingProcessFileName, 5)
+    by Day = bin(Timestamp, 1d), FileName, ActionType
+| order by Day asc
+
+What changes to look for:
+
+TenableADEventsListenerConfiguration.json changed: the set of collected events changed. Tenable can enable or disable IoAs from its console without redeploying the GPO, so someone may have switched more on.
+New .exe or .ps1 files: Tenable was upgraded.
+audit.csv or GptTmpl.inf changed: this GPO also sets your DCs' audit and security policy. Ask the Tenable owner whether it's what turned on Detailed File Share auditing in the first place.
+
+Then: take the results of steps 1–3 to whoever owns Tenable. They point to the fix: an EDR exclusion for the listener, reverting the IoA config change, or a Tenable support case. If it turns out to be expected volume, drop 5145 events for these two GPO paths with a DCR transformation so you stop paying to ingest Tenable's own traffic.
