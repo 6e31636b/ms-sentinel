@@ -685,3 +685,18 @@ DeviceNetworkEvents
 | render timechart
 
 A flat line across Sep 16 means client behavior toward the DCs didn't change while the events exploded. Treat this only as supporting evidence: one file-share connection can carry millions of reads. The account check above is the actual proof.
+
+
+"transformKql": "source | extend IsTenableFlood = EventID == 5145 and ShareName endswith 'SYSVOL' and SubjectUserName endswith '$' and (RelativeTargetName contains 'FEF166EC-DD2C-4398-AFB4-EDFD99828835' or RelativeTargetName contains '3C8BADF5-6CCB-4A47-8FAF-12E3155464F8') | where IsTenableFlood == false | project-away IsTenableFlood",
+"outputStream": "Microsoft-SecurityEvent"
+
+let source = SecurityEvent | where TimeGenerated > ago(1h);
+source
+| extend IsTenableFlood =
+        EventID == 5145
+    and ShareName endswith 'SYSVOL'
+    and SubjectUserName endswith '$'
+    and (RelativeTargetName contains 'FEF166EC-DD2C-4398-AFB4-EDFD99828835'
+      or RelativeTargetName contains '3C8BADF5-6CCB-4A47-8FAF-12E3155464F8')
+| summarize Kept = countif(IsTenableFlood == false), Dropped = countif(IsTenableFlood) by EventID
+| order by Dropped desc
