@@ -700,3 +700,6 @@ source
       or RelativeTargetName contains '3C8BADF5-6CCB-4A47-8FAF-12E3155464F8')
 | summarize Kept = countif(IsTenableFlood == false), Dropped = countif(IsTenableFlood) by EventID
 | order by Dropped desc
+
+
+  "description": "2026-09-25: transformKql drops 5145 SYSVOL reads by DC computer accounts on the Tenable IoA GPOs (FEF166EC… argon.corp.ch, 3C8BADF5… corp.ch). Ticket <ref>."
