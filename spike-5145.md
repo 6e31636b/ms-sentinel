@@ -647,3 +647,41 @@ How to read the results
 Nearly 100% "Domain controller" or "Same DC (loopback)": the reads come from the DCs themselves, not from clients. That matches everything we've seen so far.
 "Other computer", "User account" or "Non-DC" rows with real volume: clients are involved, and SampleReaders or SampleSources names them.
 A few "Other computer" rows: before counting them as clients, check whether they're DCs without the Azure Monitor Agent.
+
+
+Then MDE doesn't record that event in your tenant. It's in the schema, but not every listed event is actually collected. You don't need it, though. The DCs' own 5145 events in Sentinel are the authoritative record of who read what, and you can query them from Advanced Hunting.
+
+The proof: list every reader of those folders that isn't a DC. No rows means no clients.
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+let dcAccounts = SecurityEvent
+    | where TimeGenerated > ago(1h)
+    | distinct Account = strcat(toupper(tostring(split(Computer, ".")[0])), "$");
+SecurityEvent
+| where TimeGenerated > ago(7d)
+| where EventID == 5145 and RelativeTargetName has_any (gpos)
+| where toupper(SubjectUserName) !in (dcAccounts)
+| summarize Events = count() by SubjectUserName, IpAddress
+| order by Events desc
+Empty, or only a handful of events: every read comes from the DCs themselves, so clients aren't the cause.
+Rows with real volume: those accounts and IPs are the clients involved. Check first whether any of them is a DC that simply doesn't run the Azure Monitor Agent.
+
+Supporting check using MDE data only: did clients' file-share traffic to the DCs change on Sep 16? Port 445 is file sharing. This uses the machines running Tenable's listener as the DC list:
+
+kql
+let dcs = DeviceProcessEvents
+    | where Timestamp > ago(30d) and FileName startswith "Register-TenableAD"
+    | distinct DeviceId;
+let dcIPs = DeviceNetworkInfo
+    | where Timestamp > ago(7d) and DeviceId in (dcs)
+    | mv-expand ip = parse_json(IPAddresses)
+    | distinct IP = tostring(ip.IPAddress);
+DeviceNetworkEvents
+| where Timestamp > ago(14d)
+| where RemotePort == 445 and RemoteIP in (dcIPs)
+| where DeviceId !in (dcs)
+| summarize Connections = count(), ClientDevices = dcount(DeviceId) by Day = bin(Timestamp, 1d)
+| render timechart
+
+A flat line across Sep 16 means client behavior toward the DCs didn't change while the events exploded. Treat this only as supporting evidence: one file-share connection can carry millions of reads. The account check above is the actual proof.
