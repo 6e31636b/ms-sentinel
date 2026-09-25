@@ -590,3 +590,60 @@ let top10 = daily | summarize Total = sum(Events) by Gpo | top 10 by Total | pro
 daily
 | where Gpo in (top10)
 | render timechart
+
+
+
+Your 5145 events already hold the answer: each one records which account asked and from which IP. Both queries below run in Advanced Hunting.
+
+1. The main check, run on the 5145 events themselves. It sorts every reader of the two Tenable GPO folders into domain controllers, other computers, or user accounts. The Azure Monitor Agent only runs on your DCs, so any machine sending SecurityEvent is a DC:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+let dcAccounts = SecurityEvent
+    | where TimeGenerated > ago(1h)
+    | distinct Account = strcat(toupper(tostring(split(Computer, ".")[0])), "$");
+SecurityEvent
+| where TimeGenerated > ago(1d)
+| where EventID == 5145 and RelativeTargetName has_any (gpos)
+| extend Reader = toupper(SubjectUserName)
+| extend ReaderType = case(Reader in (dcAccounts), "Domain controller",
+                           Reader endswith "$", "Other computer (client/server)",
+                           "User account")
+| summarize Events = count(), Readers = dcount(Reader),
+            FromLoopbackPct = round(100.0 * countif(IpAddress in ("::1", "127.0.0.1")) / count(), 1),
+            SampleReaders = make_set(Reader, 10)
+    by ReaderType
+
+2. Cross-check using MDE data only. MDE keeps its own copy of these events (ActionType NetworkShareObjectAccessChecked). This query looks up each source IP and labels it as the same DC, another DC, or a non-DC device. It uses the machines running Tenable's listener as the list of DCs:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+let dcs = DeviceProcessEvents
+    | where Timestamp > ago(30d) and FileName startswith "Register-TenableAD"
+    | distinct DeviceId;
+let ipMap = DeviceNetworkInfo
+    | where Timestamp > ago(1d)
+    | mv-expand ip = parse_json(IPAddresses)
+    | extend IP = tostring(ip.IPAddress)
+    | summarize arg_max(Timestamp, DeviceId, DeviceName) by IP
+    | join kind=leftouter (DeviceInfo | where Timestamp > ago(7d) | summarize arg_max(Timestamp, DeviceType) by DeviceId) on DeviceId
+    | extend SourceRole = iff(DeviceId in (dcs), "Domain controller", strcat("Non-DC ", DeviceType))
+    | project IP, SourceDevice = DeviceName, SourceRole;
+DeviceEvents
+| where Timestamp > ago(6h)
+| where ActionType == "NetworkShareObjectAccessChecked"
+| where tostring(AdditionalFields) has_any (gpos) or FolderPath has_any (gpos)
+| extend IP = coalesce(RemoteIP, tostring(parse_json(AdditionalFields).IpAddress))
+| lookup kind=leftouter ipMap on IP
+| extend SourceRole = case(IP in ("::1", "127.0.0.1"), "Same DC (loopback)",
+                           isempty(SourceRole), "Unknown (not in MDE)", SourceRole)
+| summarize Events = count(), Sources = dcount(IP), SampleSources = make_set(coalesce(SourceDevice, IP), 10) by SourceRole
+| order by Events desc
+
+MDE may sample these events, so use this one to see who is reading, not to count how much.
+
+How to read the results
+
+Nearly 100% "Domain controller" or "Same DC (loopback)": the reads come from the DCs themselves, not from clients. That matches everything we've seen so far.
+"Other computer", "User account" or "Non-DC" rows with real volume: clients are involved, and SampleReaders or SampleSources names them.
+A few "Other computer" rows: before counting them as clients, check whether they're DCs without the Azure Monitor Agent.
