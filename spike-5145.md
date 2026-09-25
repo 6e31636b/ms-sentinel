@@ -539,3 +539,42 @@ Cost: you won't pay a data-processing charge for filtering. That charge applies 
 Nothing else changes: this only affects what lands in Sentinel. The DCs' local Security logs and Tenable's listener are untouched.
 
 A day after deploying, re-run the preview query. The Drop = true count should be close to zero, while the rest of your 5145 events keep flowing.
+
+
+1. Defender for Identity (best chance). It logs GPO changes together with the GPO's name. The edits you saw on Aug 27 are just inside its 30-day window, so run this today, before they age out:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+IdentityDirectoryEvents
+| where Timestamp > ago(30d)
+| where ActionType startswith "Group Policy"
+| where tostring(AdditionalFields) has_any (gpos)
+| extend Info = parse_json(AdditionalFields)
+| summarize LastSeen = max(Timestamp)
+    by GroupPolicyName = tostring(Info.GroupPolicyName), GroupPolicyId = tostring(Info.GroupPolicyId), ActionType
+
+If you also stream IdentityDirectoryEvents into Sentinel, you can raise ago(30d) to match your workspace retention.
+
+2. DC security logs in Sentinel (full retention). The name is written into AD when a GPO is created or renamed, and that shows up as a 5136 event on the displayName attribute. If that happened within your workspace retention, this finds it:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+SecurityEvent
+| where TimeGenerated > ago(365d)
+| where EventID == 5136 and EventData has_any (gpos)
+| extend Attribute = extract(@"Name=""AttributeLDAPDisplayName"">([^<]*)<", 1, EventData),
+         GpoName   = extract(@"Name=""AttributeValue"">([^<]*)<", 1, EventData),
+         Gpo       = toupper(extract(@"Name=""ObjectDN"">CN=\{([0-9A-Fa-f\-]{36})\}", 1, EventData))
+| where Attribute == "displayName"
+| project TimeGenerated, Gpo, GpoName, SubjectUserName
+
+This also tells you who set the name, and when.
+
+3. Long shot: the Exposure Management graph. It may hold GPOs if Defender for Identity feeds it. The query is quick, and if it returns nothing you've lost nothing:
+
+kql
+ExposureGraphNodes
+| where tostring(NodeProperties) has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| project NodeLabel, NodeName
+
+If all three come back empty, the GPOs were created and last renamed before your retention and haven't been edited in the last 30 days. In that case the AD team's one-minute lookup in Group Policy Management is the only way to get the names.
