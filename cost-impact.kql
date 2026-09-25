@@ -1,0 +1,166 @@
+// =============================================================================
+//  Defender XDR -> Microsoft Sentinel: volume and cost-impact queries
+// =============================================================================
+//  Q1  Advanced hunting    Daily volume per XDR table (average and peak)
+//  Q2  Advanced hunting    What drives a heavy table (ActionType / device / process)
+//  Q3  Sentinel workspace  E5 data grant: current use and headroom
+//  Q4  Advanced hunting    Monthly cost per table: all-analytics vs all-lake vs your plan
+//  Q5  Sentinel workspace  Billed GB/day after a pilot -> your own calibration ratio
+//
+//  Suggested order: Q1 -> Q2 -> Q3 -> Q4, then after a pilot Q5 -> update calibration.
+//  Run each query on its own.
+//
+//  All prices are PLACEHOLDERS. Use the rates for your region, currency and
+//  agreement (Cost Management or the Microsoft Sentinel pricing page).
+//  Keep the XDR table list in Q1, Q4 and Q5 in line with what your Defender XDR
+//  connector offers (TVM tables are not streamed by the connector).
+// =============================================================================
+
+
+// -----------------------------------------------------------------------------
+// Q1  Daily volume per XDR table                               (Advanced hunting)
+//     Big tenant hitting query limits? Start with lookback = 1d, or run the
+//     large Device* tables one at a time.
+// -----------------------------------------------------------------------------
+let lookback = 7d;       // full days; catches the weekday/weekend swing (AH keeps 30)
+let calibration = 0.8;   // estimate_data_size tends to read above billed size; set 1.0 when calibrating (Q5)
+union withsource=TableName isfuzzy=true
+    DeviceInfo, DeviceNetworkInfo, DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents,
+    DeviceRegistryEvents, DeviceLogonEvents, DeviceImageLoadEvents, DeviceEvents, DeviceFileCertificateInfo,
+    EmailEvents, EmailUrlInfo, EmailAttachmentInfo, EmailPostDeliveryEvents, UrlClickEvents,
+    IdentityLogonEvents, IdentityQueryEvents, IdentityDirectoryEvents,
+    CloudAppEvents, AlertInfo, AlertEvidence
+| where Timestamp >= startofday(ago(lookback)) and Timestamp < startofday(now())
+| summarize Events = count(), GB = sum(estimate_data_size(*)) * calibration / 1e9
+    by TableName, Day = startofday(Timestamp)
+| summarize AvgGBperDay = avg(GB), PeakGBperDay = max(GB), EventsPerDay = avg(Events) by TableName
+| extend MonthlyGB = AvgGBperDay * 30.4, BytesPerEvent = AvgGBperDay * 1e9 / EventsPerDay
+| project TableName,
+          AvgGBperDay   = round(AvgGBperDay, 3),
+          PeakGBperDay  = round(PeakGBperDay, 3),
+          MonthlyGB     = round(MonthlyGB, 1),
+          EventsPerDay  = tolong(EventsPerDay),
+          BytesPerEvent = tolong(BytesPerEvent)
+| order by AvgGBperDay desc
+
+
+// -----------------------------------------------------------------------------
+// Q2  What drives a heavy table                                (Advanced hunting)
+//     Swap in the table you want to explain. Change "by ActionType" to
+//     "by DeviceName" or "by InitiatingProcessFileName" to find noisy
+//     devices or processes.
+// -----------------------------------------------------------------------------
+let breakdown = materialize(
+    DeviceNetworkEvents
+    | where Timestamp >= startofday(ago(1d)) and Timestamp < startofday(now())
+    | summarize Events = count(), GB = sum(estimate_data_size(*)) / 1e9 by ActionType);
+let total = toscalar(breakdown | summarize sum(GB));
+breakdown
+| extend PctOfTable = round(100.0 * GB / total, 1)
+| order by GB desc
+
+
+// -----------------------------------------------------------------------------
+// Q3  E5 data grant: current use and headroom                (Sentinel workspace)
+//     Up to 5 MB per qualifying seat per day, one pool shared by Entra ID
+//     sign-in/audit logs, MDCA shadow IT discovery, Purview Information
+//     Protection and Defender advanced hunting data.
+//     No rows? The benefit may not be applied to this workspace; look for the
+//     benefit line in Cost Management.
+// -----------------------------------------------------------------------------
+let e5Seats = 1000;                        // qualifying E5/A5/F5/G5 (incl. Security) seats
+let grantGBperDay = e5Seats * 5 / 1000.;   // 5 MB per seat per day
+Operation
+| where TimeGenerated >= startofday(ago(30d))
+| where OperationKey == "Benefit type used: SentinelMicrosoft365"
+| extend UsedGB = toreal(extract(@"Benefit amount used: ([\d.]+) GB", 1, Detail))
+| summarize UsedGB = sum(UsedGB) by Day = startofday(TimeGenerated)
+| summarize AvgUsedGBperDay = avg(UsedGB), MaxUsedGBperDay = max(UsedGB)
+| extend GrantGBperDay    = grantGBperDay,
+         HeadroomGBperDay = max_of(grantGBperDay - MaxUsedGBperDay, 0.0)   // -> grantHeadroomGB in Q4
+
+
+// -----------------------------------------------------------------------------
+// Q4  Monthly cost per table, three scenarios in one run      (Advanced hunting)
+//     AnalyticsPerMonth : every table in the analytics tier
+//     LakePerMonth      : every table lake-only
+//     PlanPerMonth      : your mix from the plan table below
+//     The TOTAL row applies the E5 grant headroom to analytics ingestion
+//     (community guidance: the grant does not cover direct-to-lake ingestion).
+//     Assumes the Sentinel data lake is enabled, so analytics data kept beyond
+//     90 days is billed as lake storage at 6:1 compression. Lake-only storage is
+//     counted for the full retention period (conservative). Storage figures are
+//     steady state, reached once the retention window has filled.
+//     Lake query costs depend on usage and are not included.
+// -----------------------------------------------------------------------------
+let lookback = 7d;
+let calibration = 0.8;          // replace with your ratio from Q5
+let analyticsRate = 5.0;        // PLACEHOLDER: analytics ingestion per GB (your effective rate)
+let lakeIngestRate = 0.15;      // PLACEHOLDER: lake ingestion + processing per GB
+let lakeStorageRate = 0.026;    // PLACEHOLDER: lake storage per compressed GB per month
+let retentionDays = 365;        // total retention you want in Sentinel
+let grantHeadroomGB = 0.0;      // HeadroomGBperDay from Q3
+let plan = datatable(TableName:string, Tier:string) [   // Analytics | Lake | None (None = Defender only, 30 days)
+    "DeviceImageLoadEvents",     "Lake",
+    "DeviceFileCertificateInfo", "Lake",
+    "DeviceNetworkInfo",         "Lake",
+    "EmailUrlInfo",              "Lake",
+    "UrlClickEvents",            "Lake"
+];                                                       // tables not listed default to Analytics
+let perTable = materialize(
+    union withsource=TableName isfuzzy=true
+        DeviceInfo, DeviceNetworkInfo, DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents,
+        DeviceRegistryEvents, DeviceLogonEvents, DeviceImageLoadEvents, DeviceEvents, DeviceFileCertificateInfo,
+        EmailEvents, EmailUrlInfo, EmailAttachmentInfo, EmailPostDeliveryEvents, UrlClickEvents,
+        IdentityLogonEvents, IdentityQueryEvents, IdentityDirectoryEvents,
+        CloudAppEvents, AlertInfo, AlertEvidence
+    | where Timestamp >= startofday(ago(lookback)) and Timestamp < startofday(now())
+    | summarize GBperDay = sum(estimate_data_size(*)) * calibration / 1e9 / (lookback / 1d) by TableName
+    | join kind=leftouter plan on TableName
+    | extend PlanTier = coalesce(Tier, "Analytics")
+    | extend AnalyticsPerMonth = GBperDay * (30.4 * analyticsRate + max_of(retentionDays - 90, 0) / 6.0 * lakeStorageRate),
+             LakePerMonth      = GBperDay * (30.4 * lakeIngestRate + retentionDays / 6.0 * lakeStorageRate)
+    | extend PlanPerMonth = case(PlanTier == "Analytics", AnalyticsPerMonth,
+                                 PlanTier == "Lake",      LakePerMonth,
+                                 0.0)
+    | project TableName, PlanTier, GBperDay, AnalyticsPerMonth, LakePerMonth, PlanPerMonth);
+let allGB = coalesce(toscalar(perTable | summarize sum(GBperDay)), 0.0);
+let planAnalyticsGB = coalesce(toscalar(perTable | where PlanTier == "Analytics" | summarize sum(GBperDay)), 0.0);
+let allCredit = min_of(allGB, grantHeadroomGB) * 30.4 * analyticsRate;
+let planCredit = min_of(planAnalyticsGB, grantHeadroomGB) * 30.4 * analyticsRate;
+perTable
+| union (perTable
+    | summarize GBperDay = sum(GBperDay), AnalyticsPerMonth = sum(AnalyticsPerMonth),
+                LakePerMonth = sum(LakePerMonth), PlanPerMonth = sum(PlanPerMonth)
+    | extend TableName = "TOTAL (E5 grant applied)", PlanTier = "",
+             AnalyticsPerMonth = AnalyticsPerMonth - allCredit,
+             PlanPerMonth = PlanPerMonth - planCredit)
+| extend GBperDay = round(GBperDay, 2), AnalyticsPerMonth = round(AnalyticsPerMonth),
+         LakePerMonth = round(LakePerMonth), PlanPerMonth = round(PlanPerMonth)
+| extend SortKey = iff(TableName startswith "TOTAL", 1, 0)
+| order by SortKey desc, PlanPerMonth desc
+| project-away SortKey
+
+
+// -----------------------------------------------------------------------------
+// Q5  After a pilot: billed GB/day of the XDR tables you enabled
+//                                                            (Sentinel workspace)
+//     Calibration ratio = AvgBilledGBperDay / Q1 AvgGBperDay, with Q1 run at
+//     calibration = 1.0 over the same days. Use it in Q1 and Q4.
+//     Lake-only tables don't show up in Usage; see Microsoft Sentinel >
+//     Cost management in the Defender portal for those.
+// -----------------------------------------------------------------------------
+let lookback = 7d;
+let xdrTables = dynamic([
+    "DeviceInfo", "DeviceNetworkInfo", "DeviceProcessEvents", "DeviceNetworkEvents", "DeviceFileEvents",
+    "DeviceRegistryEvents", "DeviceLogonEvents", "DeviceImageLoadEvents", "DeviceEvents", "DeviceFileCertificateInfo",
+    "EmailEvents", "EmailUrlInfo", "EmailAttachmentInfo", "EmailPostDeliveryEvents", "UrlClickEvents",
+    "IdentityLogonEvents", "IdentityQueryEvents", "IdentityDirectoryEvents",
+    "CloudAppEvents", "AlertInfo", "AlertEvidence"]);
+Usage
+| where TimeGenerated >= startofday(ago(lookback)) and TimeGenerated < startofday(now())
+| where IsBillable == true and DataType in (xdrTables)
+| summarize BilledGB = sum(Quantity) / 1000. by DataType, Day = startofday(TimeGenerated)
+| summarize AvgBilledGBperDay  = round(avg(BilledGB), 3),
+            PeakBilledGBperDay = round(max(BilledGB), 3) by DataType
+| order by AvgBilledGBperDay desc
