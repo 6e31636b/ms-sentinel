@@ -578,3 +578,15 @@ ExposureGraphNodes
 | project NodeLabel, NodeName
 
 If all three come back empty, the GPOs were created and last renamed before your retention and haven't been edited in the last 30 days. In that case the AD team's one-minute lookup in Group Policy Management is the only way to get the names.
+
+
+let daily = materialize(
+    SecurityEvent
+    | where TimeGenerated > ago(14d)
+    | where EventID == 5145 and AccountType == "Machine" and ShareName == @"\\*\SYSVOL"
+    | extend Gpo = coalesce(toupper(extract(@"\{([0-9A-Fa-f\-]{36})\}", 1, RelativeTargetName)), "(other SYSVOL paths)")
+    | summarize Events = count() by Day = bin(TimeGenerated, 1d), Gpo);
+let top10 = daily | summarize Total = sum(Events) by Gpo | top 10 by Total | project Gpo;
+daily
+| where Gpo in (top10)
+| render timechart
