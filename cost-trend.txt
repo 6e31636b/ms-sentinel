@@ -1,0 +1,42 @@
+Actual spend: Azure Cost Management. Cost analysis is the only accurate view of real spend, because it's what the invoice is built from. It also splits cost into ingestion, retention and license-based discounts. Filter Service name to Sentinel, Log Analytics and Azure Monitor with daily granularity, and you see actuals next to budgets and forecasted cost. Add a budget with a forecasted-spend alert so management hears about an overrun before the bill arrives. The limitation is that it can't tell you which data connector is driving the cost. If finance wants a Power BI view, Microsoft recommends scheduled cost exports to a storage account as the way to get cost data into Excel or Power BI. 
+Practical Sentinel: Reviewing and Optimizing costs | Practical365 +3
+
+Cost drivers: the Workspace Usage Report workbook. Install it from Content hub. Its Cost Analysis tab ranks your top billable tables by estimated price. Save a copy and add a forecast tab using KQL's built-in time-series forecasting: 
+GitHub
+
+kql
+let horizon = 60;                    // days to forecast
+let rate = 5.0;                      // your per-GB price, in your billing currency
+let start = startofday(ago(84d));    // 12 weeks; stay inside Usage retention
+Usage
+| where TimeGenerated >= start and IsBillable == true
+| extend Cost = Quantity / 1000. * rate
+| make-series Actual = sum(Cost) default = 0 on TimeGenerated from start to startofday(now()) + horizon * 1d step 1d
+| extend Forecast = series_decompose_forecast(Actual, horizon, 7, 'linefit')
+| mv-expand TimeGenerated to typeof(datetime), Actual to typeof(double), Forecast to typeof(double)
+| extend Actual = iff(TimeGenerated >= startofday(now()), real(null), Actual)
+| render timechart
+
+Watch for these when you use it:
+
+The trend argument defaults to avg, and only linefit applies linear regression. Without 'linefit' the forecast is flat and never shows growth. 
+microsoft
+The 7 tells it about the weekly weekday/weekend cycle.
+Keep the lookback inside your Usage retention. Otherwise the missing days count as zeros and create a fake growth trend.
+For rate, use your actual per-GB price (pay-as-you-go or your commitment tier's effective rate) in your billing currency, not US list price.
+Check the last full month against Cost Management. License grants like the E5 or Defender for Servers P2 benefit are applied at billing, not in the Usage table, so if they're large for you the workbook will read high.
+
+Planning for the new sources. A statistical forecast can only extend the trend of data that's already coming in. It can't know about sources you haven't connected yet. Each big onboarding also shows up as a jump, and linefit treats that jump as steady growth until it drops out of the lookback window. So present it to management as two parts: baseline (organic growth) plus planned onboarding. The quick version is one extra line before render:
+
+kql
+| extend WithNewSources = iff(TimeGenerated >= datetime(2026-11-01), Forecast + 50 * rate, real(null))
+
+For many sources, keep the plan in a watchlist and join it in. Give it columns for source, estimated GB/day, go-live date and target tier, since sending a source lake-only changes its cost a lot. To size a source before onboarding: GB/day ≈ events per second × average event size in bytes × 86,400 ÷ 10⁹. So 1,000 events per second at 500 bytes is about 43 GB/day, though a one-week pilot is more reliable than any formula. Comparing estimate with actual after each go-live is what will get management to trust the forecast.
+
+Two things to watch as volume grows:
+
+Once daily ingestion is consistently above 100 GB, commitment tiers start giving real discounts. From then on cost doesn't rise in a straight line with GB, and the forecast becomes your input for choosing a tier. 
+GitHub
+If some new sources go to the data lake tier instead of analytics, the Usage table won't show those costs; you check them in Sentinel's cost management page or in Azure Cost Management. That page is in preview under Microsoft Sentinel > Cost management in the Defender portal, and it covers data lake usage. 
+GitHub
+Microsoft Learn
