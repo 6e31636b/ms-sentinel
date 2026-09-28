@@ -702,4 +702,18 @@ source
 | order by Dropped desc
 
 
+
+1. When was each GPO really edited, and by whom (Sep 15–18)? The RC4 GPO edit should show up under Aretas' admin account:
+
+kql
+SecurityEvent
+| where TimeGenerated between (datetime(2026-09-15) .. datetime(2026-09-19))
+| where EventID == 5136 and EventData contains "CN=Policies,CN=System"
+| extend Attribute = extract(@"Name=""AttributeLDAPDisplayName"">([^<]*)<", 1, EventData),
+         Gpo = toupper(extract(@"Name=""ObjectDN"">CN=\{([0-9A-Fa-f\-]{36})\}", 1, EventData))
+| where Attribute in ("versionNumber", "gPCMachineExtensionNames", "displayName")
+| summarize Changes = count(), Attributes = make_set(Attribute) by bin(TimeGenerated, 5m), Gpo, SubjectUserName
+| order by TimeGenerated asc
+
+
   "description": "2026-09-25: transformKql drops 5145 SYSVOL reads by DC computer accounts on the Tenable IoA GPOs (FEF166EC… argon.corp.ch, 3C8BADF5… corp.ch). Ticket <ref>."
