@@ -759,3 +759,34 @@ How to read the process:
 
 A Tenable process: Tenable's own component rewrote its GPOs, probably applying the Sep 14 configuration. The ticket goes to Tenable.
 semperis.executersvchost.exe: Semperis restored or changed the Tenable GPOs. The ticket goes to Semperis, with Tenable in copy.
+
+
+Query A: which process changed the real GPO files. This leaves out Semperis's snapshot copies and replication:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceFileEvents
+| where Timestamp between (datetime(2026-09-16 11:15) .. datetime(2026-09-16 12:00))
+| where FolderPath has_any (gpos)
+| where FolderPath !startswith @"C:\Semperis"
+| where InitiatingProcessFileName !~ "dfsrs.exe"
+| project Timestamp, DeviceName, ActionType, FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName
+| order by Timestamp asc
+
+Look at alpnekads5vp around 11:23 and alpnekads7vp around 11:54. KQL filters in UTC, even though the portal displays local time. The process writing gpt.ini or ScheduledTasks.xml at those moments is the one that made the change.
+
+Query B: which GPO parser started looping on Sep 16.
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+union
+  (DeviceFileEvents
+   | where Timestamp > ago(21d) and FolderPath has_any (gpos) and InitiatingProcessFileName startswith "semperis"
+   | extend Actor = strcat("Semperis: ", InitiatingProcessFileName)),
+  (DeviceProcessEvents
+   | where Timestamp > ago(21d) and FileName =~ "SenseGPParser.exe"
+   | extend Actor = "MDE: SenseGPParser.exe runs")
+| summarize Events = count() by Day = bin(Timestamp, 1d), Actor
+| render timechart
+A line that jumps on Sep 16: that's your reader.
+Flat lines: the loop may be reads that leave no file trace. In that case, the 60-second Process Monitor capture on one DC still settles it, and you can now tell the AD team to look for a Semperis process or SenseGPParser.exe specifically.
