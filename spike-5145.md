@@ -702,6 +702,9 @@ source
 | order by Dropped desc
 
 
+  "description": "2026-09-25: transformKql drops 5145 SYSVOL reads by DC computer accounts on the Tenable IoA GPOs (FEF166EC… argon.corp.ch, 3C8BADF5… corp.ch). Ticket <ref>."
+
+
 
 1. When was each GPO really edited, and by whom (Sep 15–18)? The RC4 GPO edit should show up under Aretas' admin account:
 
@@ -716,4 +719,43 @@ SecurityEvent
 | order by TimeGenerated asc
 
 
-  "description": "2026-09-25: transformKql drops 5145 SYSVOL reads by DC computer accounts on the Tenable IoA GPOs (FEF166EC… argon.corp.ch, 3C8BADF5… corp.ch). Ticket <ref>."
+
+1. What exactly changed, and on which DC. The Computer column shows the DC where the change was made:
+
+kql
+SecurityEvent
+| where TimeGenerated between (datetime(2026-09-16 11:00) .. datetime(2026-09-16 12:10))
+| where EventID == 5136
+| where EventData has_any ("FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8")
+| extend Attribute = extract(@"Name=""AttributeLDAPDisplayName"">([^<]*)<", 1, EventData),
+         OpType    = extract(@"Name=""OperationType"">([^<]*)<", 1, EventData),
+         Value     = extract(@"Name=""AttributeValue"">([^<]*)<", 1, EventData)
+| extend Operation = case(OpType == "%%14674", "added", OpType == "%%14675", "removed", OpType)
+| project TimeGenerated, Computer, SubjectUserName, Attribute, Operation, Value
+| order by TimeGenerated asc
+
+Compare the removed and added values of gPCMachineExtensionNames to see which setting types were added. Look for these GUIDs:
+
+Groups {17D89FEC…}
+Services {91FBB303…}
+Data Sources {728EE579…}
+Registry preferences {B087BE9D…}
+Scheduled Tasks {AADCED64…}
+
+If these were added on Sep 16, that matches the exact folders now being read over and over.
+
+2. Which process wrote into the GPO folders at that moment. This names the actor. The file query from Sep 16 showed Semperis's "executer" creating a file named after 3C8BADF5 that day, and Tenable's service account had pushed a new configuration on Sep 14:
+
+kql
+let gpos = dynamic(["FEF166EC-DD2C-4398-AFB4-EDFD99828835", "3C8BADF5-6CCB-4A47-8FAF-12E3155464F8"]);
+DeviceFileEvents
+| where Timestamp between (datetime(2026-09-16 11:00) .. datetime(2026-09-16 12:10))
+| where FolderPath has_any (gpos)
+| where InitiatingProcessFileName !~ "dfsrs.exe"
+| project Timestamp, DeviceName, ActionType, FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName
+| order by Timestamp asc
+
+How to read the process:
+
+A Tenable process: Tenable's own component rewrote its GPOs, probably applying the Sep 14 configuration. The ticket goes to Tenable.
+semperis.executersvchost.exe: Semperis restored or changed the Tenable GPOs. The ticket goes to Semperis, with Tenable in copy.
