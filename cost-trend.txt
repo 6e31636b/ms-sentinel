@@ -40,3 +40,16 @@ GitHub
 If some new sources go to the data lake tier instead of analytics, the Usage table won't show those costs; you check them in Sentinel's cost management page or in Azure Cost Management. That page is in preview under Microsoft Sentinel > Cost management in the Defender portal, and it covers data lake usage. 
 GitHub
 Microsoft Learn
+
+
+
+let horizon = 60;                    // days to forecast
+let start = startofday(ago(84d));    // 12 weeks; stay inside Usage retention
+Usage
+| where TimeGenerated >= start and IsBillable == true
+| extend GB = Quantity / 1000.
+| make-series ActualGB = sum(GB) default = 0 on TimeGenerated from start to startofday(now()) + horizon * 1d step 1d
+| extend ForecastGB = series_decompose_forecast(ActualGB, horizon, 7, 'linefit')
+| mv-expand TimeGenerated to typeof(datetime), ActualGB to typeof(double), ForecastGB to typeof(double)
+| extend ActualGB = iff(TimeGenerated >= startofday(now()), real(null), ActualGB)
+| render timechart
