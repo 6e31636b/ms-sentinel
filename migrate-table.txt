@@ -1,0 +1,2 @@
+az monitor log-analytics workspace table migrate -g <rg> --workspace-name <ws> `
+  --table-name TaniumThreatResponse_CL
