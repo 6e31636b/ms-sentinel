@@ -76,3 +76,8 @@ Usage
 | where TimeGenerated >= startofmonth(datetime_add('month', -2, now())) and IsBillable == true
 | summarize Actual = round(sum(Quantity) / 1000. * 5.0) by Month = format_datetime(TimeGenerated, 'yyyy-MM')
 | order by Month asc
+
+
+| extend Total = Actual + Predicted,
+         Detail = iff(Predicted > 0, strcat(tostring(toint(Actual)), " so far + ", tostring(toint(Predicted)), " predicted"), "actual")
+| project Month, Total, Detail
