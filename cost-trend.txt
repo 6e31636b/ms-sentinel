@@ -53,3 +53,20 @@ Usage
 | mv-expand TimeGenerated to typeof(datetime), ActualGB to typeof(double), ForecastGB to typeof(double)
 | extend ActualGB = iff(TimeGenerated >= startofday(now()), real(null), ActualGB)
 | render timechart
+
+
+let rate = 5.0;                                                  // your effective cost per GB
+let today = startofday(now());
+let nextMonth = startofmonth(datetime_add('month', 1, now()));   // first day of next month
+let start = startofmonth(datetime_add('month', -2, now()));      // two full months back (needs ~92 days of Usage)
+let horizon = toint((nextMonth - today) / 1d);                   // days left this month, incl. today
+Usage
+| where TimeGenerated >= start and IsBillable == true
+| extend Cost = Quantity / 1000. * rate
+| make-series Daily = sum(Cost) default = 0 on TimeGenerated from start to nextMonth step 1d
+| extend Forecast = series_decompose_forecast(Daily, horizon, 7, 'linefit')
+| mv-expand TimeGenerated to typeof(datetime), Daily to typeof(double), Forecast to typeof(double)
+| summarize Actual = round(sumif(Daily, TimeGenerated < today)), Predicted = round(sumif(Forecast, TimeGenerated >= today))
+    by Month = format_datetime(TimeGenerated, 'yyyy-MM')
+| order by Month asc
+| render columnchart kind=stacked
