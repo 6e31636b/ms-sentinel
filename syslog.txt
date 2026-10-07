@@ -1,0 +1,18 @@
+if ($syslogfacility-text == "user"
+    and $hostname startswith_i "fw"
+    and $rawmsg contains ",THREAT,") then {
+    set $!pan_type = "threat";
+    action(type="omfile" dynaFile="PaloAlto")
+    stop
+}
+
+sudo mv /etc/rsyslog.d/30-paloalto.conf /etc/rsyslog.d/05-paloalto.conf
+sudo nano /etc/rsyslog.d/05-paloalto.conf
+sudo rsyslogd -N1 && sudo systemctl restart rsyslog
+
+sudo journalctl -u rsyslog -n 30 --no-pager
+
+sudo rsyslogd -N1; echo "exit: $?"
+
+sudo rsyslogd -N1 -o /tmp/rsyslog-full.conf
+grep -n -E 'PaloAlto|omfwd|stop' /tmp/rsyslog-full.conf
