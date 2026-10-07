@@ -16,3 +16,20 @@ sudo rsyslogd -N1; echo "exit: $?"
 
 sudo rsyslogd -N1 -o /tmp/rsyslog-full.conf
 grep -n -E 'PaloAlto|omfwd|stop' /tmp/rsyslog-full.conf
+
+
+let lookback = 2d;
+let binSize = 15m;
+let cl = PaloAltoThreat_CL
+    | where TimeGenerated > ago(lookback)
+    | where RawData contains ",THREAT,"
+    | summarize Events = count() by bin(TimeGenerated, binSize)
+    | extend Series = "PaloAltoThreat_CL (kept)";
+let sys = Syslog
+    | where TimeGenerated > ago(lookback) and Facility == "user"
+    | extend IsPanThreat = HostName startswith "fw" and SyslogMessage contains ",THREAT,"
+    | summarize Events = count() by bin(TimeGenerated, binSize), IsPanThreat
+    | extend Series = iff(IsPanThreat, "Syslog: Palo Alto threat (duplicate)", "Syslog: other user facility")
+    | project-away IsPanThreat;
+union cl, sys
+| render timechart with (title="Palo Alto threat logs: file table vs Syslog duplicate")
