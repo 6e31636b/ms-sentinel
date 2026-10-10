@@ -1,0 +1,51 @@
+[SG] Sentinel Dev Environment Governance
+Oct 10, 2026 · @Pleskovica
+Purpose
+How to use the Microsoft Sentinel dev environment: what you can change yourself, what needs the SIEM Engineer, and how every change gets cleaned up after testing.
+Main content
+Dev at a glance
+• Dev is a separate Sentinel workspace ([dev workspace name]) in its own resource group, used to build and test platform changes before they go to prod.
+• This guide covers the platform: data connectors, data collection rules (DCRs), Content Hub solutions, parsers, playbooks, workspace settings and access. Detection content is covered in [link].
+• The SOC does not monitor dev. Incidents there are not triaged.
+• Dev has a daily cap of [X] GB/day as a safety net.
+Ground rules
+1. Dev is for testing. Whatever you switch on, you switch off: once it is live in prod, or once you no longer need it.
+2. Log every change in [ticket queue or dev change log] with an owner and a remove-by date (default 30 days).
+3. Anything impactful goes to the SIEM Engineer first: anything that costs real money, touches something outside the dev workspace, or changes access. Not sure? Ask.
+4. Use test or sample data where you can. Production logs in dev are still production data and get the same handling as in prod.
+5. Automation in dev must not notify real teams, raise real tickets, or act on production systems.
+6. Don't change the daily cap, retention or access yourself.
+Do it yourself or ask first
+Go ahead, and log it:
+• Install and remove Content Hub solutions
+• Create and change parsers, functions, workbooks and watchlists
+• Connect low-volume sources from dev test machines
+• Build playbooks and automation rules that act only inside dev
+Ask the SIEM Engineer first:
+• Anything on production systems: agents or DCRs on prod servers, Syslog/CEF forwarders, diagnostic settings on prod resources
+• Tenant-wide settings: Entra ID diagnostic settings, the Defender XDR connector, Defender portal settings
+• High-volume sources (firewall, proxy, DNS, raw EDR events) and features that generate data on their own, such as UEBA
+• Connectors or solutions that deploy Azure resources (Function Apps, storage, Key Vault) or need production credentials
+• Workspace settings (daily cap, retention, table plans) and access (roles, app registrations, managed identities)
+From dev to prod, and cleaning up
+1. Log the change, then build and test it in dev.
+2. The day after you connect anything new, check its volume with the query below. If it's more than expected, filter it or switch it off.
+3. If it is going to prod, agree the change with the SIEM Engineer. They make or approve the prod change, built from the agreed config rather than copied from dev.
+4. Once it is live and verified in prod, or the test is dropped, switch it off in dev.
+5. Stop the data at the source. Disabling a connector in Sentinel doesn't always stop the flow, so also remove the DCR association or DCR, the diagnostic setting, or the forwarder config.
+6. Close the ticket or update the change log.
+Daily volume by table:
+Usage
+| where TimeGenerated > ago(1d)
+| where IsBillable == true
+| summarize GB = round(sum(Quantity) / 1000, 2) by DataType
+| sort by GB desc
+Daily cap and cost
+• The cap is [X] GB/day and resets at [HH:MM] UTC. The reset hour is set per workspace and can't be changed.
+• When the cap is hit, data collection stops until the reset. Expect gaps in dev data; that's the cap doing its job.
+• Microsoft treats the cap as a safeguard against unexpected spikes, not a day-to-day cost control. If a test needs more, filter the source or talk to the SIEM Engineer. Don't raise the cap.
+• The SIEM Engineer gets an alert when the cap is hit. Hitting it more than once usually means something was left running.
+Housekeeping
+• Monthly, the SIEM Engineer reviews dev. Anything past its remove-by date is switched off or extended with a reason, and ingestion, cost and cap hits are checked.
+• Anything running in dev that isn't logged and that nobody claims within [5 working days] gets switched off.
+• Quarterly, access to dev is reviewed.
