@@ -1,0 +1,107 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "dcrName": {
+      "type": "string",
+      "defaultValue": "alp-dcr-sentinel-prod-01-linux-collector-pan-traffic"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "switzerlandnorth",
+      "metadata": {
+        "description": "Same region as your other collector DCRs."
+      }
+    },
+    "workspaceName": {
+      "type": "string",
+      "defaultValue": "alp-law-sentinel-prod-01",
+      "metadata": {
+        "description": "Deploy into the resource group that contains this workspace."
+      }
+    },
+    "filePattern": {
+      "type": "string",
+      "defaultValue": "/var/log/pan/traffic/user/*.log",
+      "metadata": {
+        "description": "Files written by the rsyslog TRAFFIC rule."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dcrName')]",
+      "location": "[parameters('location')]",
+      "kind": "Linux",
+      "tags": {
+        "Type": "PaloAlto"
+      },
+      "properties": {
+        "description": "Palo Alto TRAFFIC logs from the collectors' rsyslog files into PaloAltoTraffic_CL",
+        "streamDeclarations": {
+          "Custom-Text-PaloAltoTraffic_CL": {
+            "columns": [
+              {
+                "name": "TimeGenerated",
+                "type": "datetime"
+              },
+              {
+                "name": "RawData",
+                "type": "string"
+              },
+              {
+                "name": "FilePath",
+                "type": "string"
+              },
+              {
+                "name": "Computer",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "dataSources": {
+          "logFiles": [
+            {
+              "name": "Custom-Text-PaloAltoTraffic_CL",
+              "streams": [
+                "Custom-Text-PaloAltoTraffic_CL"
+              ],
+              "filePatterns": [
+                "[parameters('filePattern')]"
+              ],
+              "format": "text",
+              "settings": {
+                "text": {
+                  "recordStartTimestampFormat": "MMM d hh:mm:ss"
+                }
+              }
+            }
+          ]
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "name": "la-sentinel",
+              "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "Custom-Text-PaloAltoTraffic_CL"
+            ],
+            "destinations": [
+              "la-sentinel"
+            ],
+            "transformKql": "source\n| extend f = extract_all(@'(?:^|,)(\"[^\"]*\"|[^,]*)', RawData)\n| project TimeGenerated, RawData, FilePath, Computer,\n    ReceiveTime = tostring(f[1]),\n    DeviceId = tostring(f[2]),\n    LogType = tostring(f[3]),\n    Subtype = tostring(f[4]),\n    GeneratedTime = tostring(f[6]),\n    SourceIP = tostring(f[7]),\n    DestinationIP = tostring(f[8]),\n    NatSourceIP = tostring(f[9]),\n    NatDestinationIP = tostring(f[10]),\n    RuleName = tostring(f[11]),\n    SourceUser = extract(@'^\"?(.*?)\"?$', 1, tostring(f[12])),\n    DestinationUser = extract(@'^\"?(.*?)\"?$', 1, tostring(f[13])),\n    Application = tostring(f[14]),\n    SourceZone = tostring(f[16]),\n    DestinationZone = tostring(f[17]),\n    InboundInterface = tostring(f[18]),\n    OutboundInterface = tostring(f[19]),\n    SessionId = tostring(f[22]),\n    SourcePort = toint(f[24]),\n    DestinationPort = toint(f[25]),\n    Protocol = tostring(f[29]),\n    Action = tostring(f[30]),\n    Bytes = tolong(f[31]),\n    BytesSent = tolong(f[32]),\n    BytesReceived = tolong(f[33]),\n    Packets = tolong(f[34]),\n    StartTime = tostring(f[35]),\n    ElapsedTime = toint(f[36]),\n    Category = tostring(f[37]),\n    SourceCountry = extract(@'^\"?(.*?)\"?$', 1, tostring(f[41])),\n    DestinationCountry = extract(@'^\"?(.*?)\"?$', 1, tostring(f[42])),\n    PacketsSent = tolong(f[44]),\n    PacketsReceived = tolong(f[45]),\n    SessionEndReason = tostring(f[46]),\n    DeviceName = tostring(f[52])",
+            "outputStream": "Custom-PaloAltoTraffic_CL"
+          }
+        ]
+      }
+    }
+  ]
+}
