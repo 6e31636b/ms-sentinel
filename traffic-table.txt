@@ -1,0 +1,85 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "defaultValue": "alp-law-sentinel-prod-01",
+      "metadata": {
+        "description": "Log Analytics workspace. Deploy into the resource group that contains it."
+      }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "PaloAltoTraffic_CL",
+      "metadata": {
+        "description": "Custom table name. Must end with _CL."
+      }
+    },
+    "plan": {
+      "type": "string",
+      "defaultValue": "Analytics",
+      "allowedValues": [
+        "Analytics",
+        "Basic"
+      ],
+      "metadata": {
+        "description": "Analytics supports normal analytics rules. Basic is cheaper but has limited querying."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/{1}', parameters('workspaceName'), parameters('tableName'))]",
+      "properties": {
+        "plan": "[parameters('plan')]",
+        "schema": {
+          "name": "[parameters('tableName')]",
+          "columns": [
+            { "name": "TimeGenerated", "type": "datetime", "description": "Collection time set by AMA" },
+            { "name": "RawData", "type": "string", "description": "Full original log line" },
+            { "name": "FilePath", "type": "string", "description": "Source file on the collector" },
+            { "name": "Computer", "type": "string", "description": "Collector that read the file" },
+            { "name": "ReceiveTime", "type": "string", "description": "PAN traffic field 1" },
+            { "name": "DeviceId", "type": "string", "description": "PAN traffic field 2 (serial number)" },
+            { "name": "LogType", "type": "string", "description": "PAN traffic field 3" },
+            { "name": "Subtype", "type": "string", "description": "PAN traffic field 4 (start, end, drop, deny)" },
+            { "name": "GeneratedTime", "type": "string", "description": "PAN traffic field 6" },
+            { "name": "SourceIP", "type": "string", "description": "PAN traffic field 7" },
+            { "name": "DestinationIP", "type": "string", "description": "PAN traffic field 8" },
+            { "name": "NatSourceIP", "type": "string", "description": "PAN traffic field 9" },
+            { "name": "NatDestinationIP", "type": "string", "description": "PAN traffic field 10" },
+            { "name": "RuleName", "type": "string", "description": "PAN traffic field 11" },
+            { "name": "SourceUser", "type": "string", "description": "PAN traffic field 12" },
+            { "name": "DestinationUser", "type": "string", "description": "PAN traffic field 13" },
+            { "name": "Application", "type": "string", "description": "PAN traffic field 14" },
+            { "name": "SourceZone", "type": "string", "description": "PAN traffic field 16" },
+            { "name": "DestinationZone", "type": "string", "description": "PAN traffic field 17" },
+            { "name": "InboundInterface", "type": "string", "description": "PAN traffic field 18" },
+            { "name": "OutboundInterface", "type": "string", "description": "PAN traffic field 19" },
+            { "name": "SessionId", "type": "string", "description": "PAN traffic field 22" },
+            { "name": "SourcePort", "type": "int", "description": "PAN traffic field 24" },
+            { "name": "DestinationPort", "type": "int", "description": "PAN traffic field 25" },
+            { "name": "Protocol", "type": "string", "description": "PAN traffic field 29" },
+            { "name": "Action", "type": "string", "description": "PAN traffic field 30" },
+            { "name": "Bytes", "type": "long", "description": "PAN traffic field 31" },
+            { "name": "BytesSent", "type": "long", "description": "PAN traffic field 32" },
+            { "name": "BytesReceived", "type": "long", "description": "PAN traffic field 33" },
+            { "name": "Packets", "type": "long", "description": "PAN traffic field 34" },
+            { "name": "StartTime", "type": "string", "description": "PAN traffic field 35" },
+            { "name": "ElapsedTime", "type": "int", "description": "PAN traffic field 36 (seconds)" },
+            { "name": "Category", "type": "string", "description": "PAN traffic field 37" },
+            { "name": "SourceCountry", "type": "string", "description": "PAN traffic field 41" },
+            { "name": "DestinationCountry", "type": "string", "description": "PAN traffic field 42" },
+            { "name": "PacketsSent", "type": "long", "description": "PAN traffic field 44" },
+            { "name": "PacketsReceived", "type": "long", "description": "PAN traffic field 45" },
+            { "name": "SessionEndReason", "type": "string", "description": "PAN traffic field 46" },
+            { "name": "DeviceName", "type": "string", "description": "PAN traffic field 52" }
+          ]
+        }
+      }
+    }
+  ]
+}
