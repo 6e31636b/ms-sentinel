@@ -33,3 +33,53 @@ let sys = Syslog
     | project-away IsPanThreat;
 union cl, sys
 | render timechart with (title="Palo Alto threat logs: file table vs Syslog duplicate")
+
+
+
+# /etc/rsyslog.d/05-paloalto.conf
+#
+# Palo Alto logs (native CSV format, facility user, sender hostname
+# starting with "fw") go to /var/log/pan/<type>/user/<sender>.log, where
+# the AMA text-log DCRs read them:
+#   /var/log/pan/threat/user/   -> PaloAltoThreat_CL
+#   /var/log/pan/url/user/      -> PaloAltoUrlFiltering_CL
+#   /var/log/pan/traffic/user/  -> PaloAltoTraffic_CL
+#
+# The 05- prefix makes this file load before 10-azuremonitoragent-omfwd.conf.
+# "stop" ends processing for matched events, so they never reach the AMA
+# syslog port and aren't duplicated into the Syslog table.
+#
+# Log type and subtype are read from their exact CSV columns (the 4th and
+# 5th comma-separated fields), so a rule, zone or profile named THREAT or
+# TRAFFIC can't misroute a line. URL filtering logs are THREAT logs with
+# subtype url, so the url rule must stay above the threat rule.
+
+template(name="PaloAlto" type="string"
+         string="/var/log/pan/%$!pan_type%/%syslogfacility-text%/%hostname%.log")
+
+# URL filtering logs (type THREAT, subtype url)
+if ($syslogfacility-text == "user" and $hostname startswith_i "fw"
+    and field($rawmsg, 44, 4) == "THREAT" and field($rawmsg, 44, 5) == "url") then {
+    set $!pan_type = "url";
+    action(type="omfile" dynaFile="PaloAlto")
+    stop
+}
+
+# All other threat logs (virus, spyware, vulnerability, wildfire, file, data, ...)
+if ($syslogfacility-text == "user" and $hostname startswith_i "fw"
+    and field($rawmsg, 44, 4) == "THREAT") then {
+    set $!pan_type = "threat";
+    action(type="omfile" dynaFile="PaloAlto")
+    stop
+}
+
+# Traffic logs
+if ($syslogfacility-text == "user" and $hostname startswith_i "fw"
+    and field($rawmsg, 44, 4) == "TRAFFIC") then {
+    set $!pan_type = "traffic";
+    action(type="omfile" dynaFile="PaloAlto")
+    stop
+}
+
+# Anything else from the firewalls (SYSTEM, CONFIG, GLOBALPROTECT, ...)
+# continues to the default rules and ends up in the Syslog table.
