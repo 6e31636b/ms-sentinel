@@ -1,0 +1,80 @@
+bash
+df -h /
+sudo du -xh --max-depth=3 /var/log /var/opt/microsoft/azuremonitoragent /var/spool/rsyslog | sort -h | tail -15
+
+Where to check the rotation settings
+
+/etc/logrotate.conf holds the defaults.
+/etc/logrotate.d/ has one file per application. grep -rn "pan\|remotelogs" /etc/logrotate.d/ shows which rule covers your folders, if any. Most likely pan-rsyslog still points at the old /var/log/remotelogs.
+/var/lib/logrotate/status shows when each file was last rotated.
+systemctl list-timers logrotate.timer shows when logrotate runs (once a day on Ubuntu).
+
+Why the script doesn’t help: it never touches /var/log/pan. It empties syslog, auth.log, kern.log and messages, empties the old remotelogs folder, deletes files that were already rotated, and runs only once a week. Live files that nothing rotates just keep growing.
+
+Second: the fix
+
+Free up space now (pick one)
+
+Grow the root disk, which loses nothing. In EC2 → Volumes, modify the root volume’s size, then on the box run sudo growpart /dev/nvme0n1 1 and sudo resize2fs /dev/nvme0n1p1. Check the device names with lsblk first.
+Or empty the traffic files, once Sentinel has caught up. Check that the last line of the file (sudo tail -n1 <file>) and PaloAltoTraffic_CL | summarize max(TimeGenerated) are only minutes apart. Then run sudo truncate -s 0 /var/log/pan/traffic/user/*.log. Use truncate, not rm: deleting a file that rsyslog has open doesn’t free the space.
+
+The permanent fix: replace /etc/logrotate.d/pan-rsyslog with:
+
+/var/log/pan/*/*/*.log {
+    daily
+    rotate 3
+    maxage 3
+    maxsize 2G
+    compress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}
+“Every 3 days”: logrotate only rotates daily, weekly or monthly. daily plus rotate 3 keeps the live file and the last 3 days compressed. That also covers Microsoft’s advice to keep text-log files at least two days so AMA can finish reading them.
+maxsize 2G rotates a file early once it passes 2 GB, but only when logrotate runs, so make it run hourly with sudo systemctl edit logrotate.timer and add:
+  [Timer]
+  OnCalendar=
+  OnCalendar=hourly
+
+Your daily rules still rotate once a day; the hourly run only adds the size check.
+
+Dry run first: sudo logrotate -d /etc/logrotate.d/pan-rsyslog shows what it would do without changing anything.
+Check the sizing after a day with sudo du -sh /var/log/pan/*/user. Three compressed days plus one live day should take at most about half the disk. If they don’t fit, grow the disk or lower rotate.
+
+After that, retire the cleanup script.
+
+Third: monitoring
+
+AMA covers most of this. Turn each query below into an Azure Monitor log search alert with an action group (email or Teams). If the SOC should get incidents instead, use a Sentinel scheduled rule.
+
+1. Disk, CPU and memory. Create a DCR for the collectors: Monitor → Data Collection Rules → Create → Linux → data source Performance Counters → Basic. The data lands in the Perf table.
+
+kql
+Perf
+| where TimeGenerated > ago(15m)
+| where ObjectName == "Logical Disk" and CounterName == "% Used Space" and InstanceName == "/"
+| summarize UsedPct = max(CounterValue) by Computer
+| where UsedPct > 80
+
+Once data arrives, check the exact names with Perf | distinct ObjectName, CounterName, InstanceName.
+
+2. A collector or its agent is down. AMA sends a heartbeat every minute.
+
+kql
+Heartbeat
+| where TimeGenerated > ago(1d)
+| summarize Last = max(TimeGenerated) by Computer
+| where Computer startswith "ip-10-29-1-" and Last < ago(10m)
+
+3. A table or a firewall went silent
+
+kql
+union isfuzzy=true PaloAltoThreat_CL, PaloAltoTraffic_CL, PaloAltoUrlFiltering_CL
+| where TimeGenerated > ago(7d)
+| summarize Last = max(TimeGenerated) by Table = Type, Sender = Computer
+| where Last < ago(1h)
+
+For the Syslog table, run the same idea grouped by Facility, HostName. Quiet facilities like auth need a longer window, or they’ll alert constantly.
