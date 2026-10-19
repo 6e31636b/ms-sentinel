@@ -10,7 +10,6 @@ Where to check the rotation settings
 systemctl list-timers logrotate.timer shows when logrotate runs (once a day on Ubuntu).
 
 Why the script doesn’t help: it never touches /var/log/pan. It empties syslog, auth.log, kern.log and messages, empties the old remotelogs folder, deletes files that were already rotated, and runs only once a week. Live files that nothing rotates just keep growing.
-
 Second: the fix
 
 Free up space now (pick one)
@@ -78,3 +77,90 @@ union isfuzzy=true PaloAltoThreat_CL, PaloAltoTraffic_CL, PaloAltoUrlFiltering_C
 | where Last < ago(1h)
 
 For the Syslog table, run the same idea grouped by Facility, HostName. Quiet facilities like auth need a longer window, or they’ll alert constantly.
+
+
+
+
+
+It keeps 7 days.
+delaycompress leaves yesterday’s file uncompressed. With traffic logs, that’s a big file.
+Nothing limits file size during the day.
+
+Here’s your file with four changes. I tested it with logrotate in my sandbox.
+
+/var/log/pan/*/*/*.log {
+    daily
+    maxsize 1G
+    rotate 3
+    compress
+    missingok
+    notifempty
+    dateext
+    dateformat -%Y%m%d-%H%M%S
+    create 0640 syslog adm
+    sharedscripts
+    postrotate
+        systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+    endscript
+}
+rotate 7 → rotate 3: keeps 3 old files instead of 7.
+delaycompress removed: rotated files get compressed right away.
+maxsize 1G added: rotates a file early once it passes 1 GB.
+dateformat now includes the time. With the date-only format, a second size-based rotation on the same day fails (“destination already exists, skipping rotation”), and the file keeps growing. My test reproduced that.
+
+On busy days, size-based rotations mean the 3 kept files can cover less than 3 days. That’s the trade-off that keeps the disk safe, and the data itself is already in Sentinel.
+
+Backup: copy it, don’t rename it in place. Keep the copy outside /etc/logrotate.d. logrotate reads every file in that folder. The version I tested skips .bak names, but older versions may not, and then the copy clashes with the real file.
+
+Step by step on the collector
+
+See what’s there:
+bash
+   df -h /
+   sudo du -sh /var/log/pan/*/user
+   ls -lh /var/log/pan/traffic/user/
+Free space now. The new rule won’t clean up files rotated under the old date-only naming; my test confirmed it leaves them. So remove the old ones by age, then compress the uncompressed one:
+bash
+   sudo find /var/log/pan -type f -name "*.log-*" -mtime +2 -print -delete
+   sudo find /var/log/pan -type f -name "*.log-*" ! -name "*.gz" -print -exec gzip {} \;
+
+If gzip fails for lack of space, delete that uncompressed file instead. Its contents are already in Sentinel.
+
+Back up the current rule:
+bash
+   sudo cp /etc/logrotate.d/pan-rsyslog /root/pan-rsyslog.$(date +%F).bak
+Replace the content with the config above:
+bash
+   sudo nano /etc/logrotate.d/pan-rsyslog
+Dry run. This changes nothing and shows only errors and the Palo Alto lines:
+bash
+   sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -i -E "error|pan/"
+Rotate once now to shrink today’s big files:
+bash
+   sudo logrotate -f -v /etc/logrotate.d/pan-rsyslog
+Make logrotate run hourly, so maxsize gets checked during the day:
+bash
+   sudo systemctl edit logrotate.timer
+
+Add these lines in the editor and save:
+
+   [Timer]
+   OnCalendar=
+   OnCalendar=hourly
+   AccuracySec=1m
+
+Then confirm the next run is within the hour:
+
+bash
+   systemctl list-timers logrotate.timer
+Verify:
+bash
+   ls -lh /var/log/pan/traffic/user/
+   df -h /
+   grep pan /var/lib/logrotate/status
+
+In Sentinel, data should keep flowing: PaloAltoTraffic_CL | where TimeGenerated > ago(15m) | count.
+
+Do the same on the second collector.
+
+After a day, check sudo du -sh /var/log/pan/*/user again. If the Palo Alto logs take more than about half the disk, lower maxsize or grow the volume.
