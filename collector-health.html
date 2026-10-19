@@ -1,0 +1,882 @@
+<title>Syslog Collector Health</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: an operator's field manual. Sticky contents rail beside one reading column;
+   commands, queries and wide tables scroll inside their own frames. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #16202b;
+  --muted: #586574;
+  --rule: #d8dee6;
+  --rule-strong: #98a4b1;
+  --accent: #2446c0;
+  --accent-tint: rgba(36, 70, 192, 0.08);
+  --code-bg: #edf0f4;
+  --code-ink: #1b2631;
+  --code-comment: #6a7684;
+  --good: #1c7449;
+  --warn: #8f5500;
+  --crit: #b02a20;
+  --info: #4a5969;
+  --good-bg: rgba(28, 116, 73, 0.10);
+  --warn-bg: rgba(143, 85, 0, 0.12);
+  --crit-bg: rgba(176, 42, 32, 0.10);
+  --info-bg: rgba(74, 89, 105, 0.12);
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1217;
+    --surface: #141b22;
+    --ink: #e2e7ed;
+    --muted: #96a2af;
+    --rule: #25303b;
+    --rule-strong: #4f5c69;
+    --accent: #93abff;
+    --accent-tint: rgba(147, 171, 255, 0.12);
+    --code-bg: #10171e;
+    --code-ink: #d6dde5;
+    --code-comment: #7e8b98;
+    --good: #62c993;
+    --warn: #efb25a;
+    --crit: #ff8b81;
+    --info: #a8b5c3;
+    --good-bg: rgba(98, 201, 147, 0.14);
+    --warn-bg: rgba(239, 178, 90, 0.14);
+    --crit-bg: rgba(255, 139, 129, 0.14);
+    --info-bg: rgba(168, 181, 195, 0.14);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1217;
+  --surface: #141b22;
+  --ink: #e2e7ed;
+  --muted: #96a2af;
+  --rule: #25303b;
+  --rule-strong: #4f5c69;
+  --accent: #93abff;
+  --accent-tint: rgba(147, 171, 255, 0.12);
+  --code-bg: #10171e;
+  --code-ink: #d6dde5;
+  --code-comment: #7e8b98;
+  --good: #62c993;
+  --warn: #efb25a;
+  --crit: #ff8b81;
+  --info: #a8b5c3;
+  --good-bg: rgba(98, 201, 147, 0.14);
+  --warn-bg: rgba(239, 178, 90, 0.14);
+  --crit-bg: rgba(255, 139, 129, 0.14);
+  --info-bg: rgba(168, 181, 195, 0.14);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--font-body);
+  -webkit-text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "rail" "main";
+  gap: 28px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-block: 32px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 1080px) {
+  .shell {
+    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-areas: "rail head" "rail main";
+    column-gap: 56px;
+  }
+}
+
+/* Header */
+.page-head { grid-area: head; min-width: 0; max-width: 820px; }
+.eyebrow {
+  font: 500 0.74rem/1.2 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+h1 {
+  font: 600 clamp(1.9rem, 1.3rem + 2.2vw, 2.6rem)/1.12 var(--font-display);
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+.lead { font-size: 1.08rem; max-width: 65ch; margin: 0; }
+.stamp { font: 400 0.82rem/1.4 var(--font-mono); color: var(--muted); margin: 14px 0 0; font-variant-numeric: tabular-nums; }
+
+/* Contents rail */
+.toc { grid-area: rail; min-width: 0; }
+.toc-inner {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.toc-label { font: 500 0.72rem/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc .part { font: 600 0.8rem/1.3 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-top: 10px; }
+.toc a { display: block; padding: 4px 8px; margin-left: -8px; border-radius: 4px; color: var(--ink); text-decoration: none; font-size: 0.9rem; line-height: 1.35; }
+.toc a:hover { background: var(--accent-tint); }
+.toc a[aria-current="true"] { color: var(--accent); background: var(--accent-tint); font-weight: 500; }
+@media (max-width: 1079px) {
+  .toc ol { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); column-gap: 16px; }
+  .toc .part { grid-column: 1 / -1; }
+}
+@media (min-width: 1080px) {
+  .toc-inner { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); border: 0; background: none; padding: 4px 0 0; }
+}
+
+/* Main column */
+main { grid-area: main; min-width: 0; max-width: 820px; display: grid; gap: 56px; }
+section { min-width: 0; display: grid; gap: 16px; scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 16px); }
+section > p, .step > p { margin: 0; max-width: 68ch; }
+h2 {
+  font: 600 1.6rem/1.2 var(--font-display);
+  margin: 0;
+  text-wrap: balance;
+}
+.part-break { border-top: 2px solid var(--ink); padding-top: 18px; }
+.part-break .eyebrow { margin-bottom: 6px; }
+h3 { font: 600 1.02rem/1.35 var(--font-body); margin: 8px 0 0; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  padding: 0.08em 0.34em;
+  border-radius: 3px;
+}
+td code { overflow-wrap: break-word; }
+
+/* Code blocks */
+.code { border: 1px solid var(--rule); border-radius: 6px; background: var(--code-bg); min-width: 0; overflow: hidden; }
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.lang { font: 500 0.7rem/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.copy {
+  font: 500 0.78rem/1 var(--font-body);
+  padding: 7px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 72px;
+}
+.copy:hover { border-color: var(--accent); color: var(--accent); }
+.copy[data-state="done"] { border-color: var(--good); color: var(--good); }
+.code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font: 0.84rem/1.62 var(--font-mono); color: var(--code-ink); tab-size: 4; }
+.code pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
+.code .c { color: var(--code-comment); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; line-height: 1.5; }
+table.wide { min-width: 720px; }
+th {
+  text-align: left;
+  font: 600 0.72rem/1.3 var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+th.good { color: var(--good); }
+th.ifnot { color: var(--warn); }
+td { padding: 10px 14px; border-top: 1px solid var(--rule); vertical-align: top; }
+tbody tr:first-child td { border-top: 0; }
+td.key { font-weight: 600; }
+@media (min-width: 640px) { td.key { white-space: nowrap; } }
+td.num { width: 1%; }
+.n {
+  display: inline-grid; place-items: center;
+  min-width: 1.6em; height: 1.6em;
+  font: 500 0.78rem/1 var(--font-mono);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.sev {
+  display: inline-block;
+  font: 600 0.72rem/1 var(--font-mono);
+  padding: 4px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.sev.s1 { color: var(--crit); background: var(--crit-bg); }
+.sev.s2 { color: var(--warn); background: var(--warn-bg); }
+.sev.s3 { color: var(--info); background: var(--info-bg); }
+.tight { white-space: nowrap; }
+
+/* Diagram */
+.figure { margin: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); min-width: 0; }
+.fig-title { margin: 0; padding: 14px 16px 0; font: 600 1rem/1.4 var(--font-body); }
+.fig-scroll { overflow-x: auto; padding: 4px 8px 8px; }
+.flow { display: block; width: 100%; min-width: 620px; height: auto; }
+.figure figcaption { padding: 10px 16px 14px; border-top: 1px solid var(--rule); font-size: 0.88rem; color: var(--muted); }
+.dg-frame { fill: var(--bg); stroke: var(--rule); stroke-width: 1; }
+.dg-box { fill: var(--surface); stroke: var(--rule-strong); stroke-width: 1.25; }
+.dg-hot { fill: var(--accent-tint); stroke: var(--accent); stroke-width: 2; }
+.dg-edge { fill: none; stroke: var(--muted); stroke-width: 1.25; }
+.dg-arrow { fill: var(--muted); }
+.dg-name { fill: var(--ink); font: 600 13px var(--font-body); }
+.dg-line { fill: var(--muted); font: 400 11.5px var(--font-body); }
+.dg-line.hot { fill: var(--ink); }
+
+/* Emergency steps */
+.steps { display: grid; gap: 20px; }
+.step { display: grid; gap: 10px; min-width: 0; }
+.step h3 { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.step h3 .n { color: var(--crit); border-color: var(--crit); }
+.note { border-left: 3px solid var(--rule-strong); padding: 2px 0 2px 14px; color: var(--muted); max-width: 68ch; margin: 0; }
+
+/* Labelled query blocks */
+.query { display: grid; gap: 8px; min-width: 0; }
+.query h3 { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.query p { margin: 0; max-width: 68ch; }
+
+/* Rollout checklists */
+.phase { display: grid; gap: 8px; }
+.phase h3 { margin: 4px 0 0; }
+.tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tasks label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.tasks input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); }
+.tasks input:checked + span { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--rule-strong); }
+.hint { font-size: 0.84rem; color: var(--muted); margin: 0; }
+
+.sources ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+</style>
+
+<div class="shell">
+
+<header class="page-head">
+  <p class="eyebrow">Runbook · Sentinel syslog collectors</p>
+  <h1>Syslog collector health checks and monitoring plan</h1>
+  <p class="lead">Run the quick check in Part 1 on each collector every morning; it takes about 5 minutes. Part 2 turns the same checks into alerts: a filling disk, a failed service or a stuck queue reaches someone within about 15 minutes, and a silent firewall within about an hour.</p>
+  <p class="stamp">As of 19 October 2026 · workspace alp-law-sentinel-prod-01</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <div class="toc-inner">
+    <p class="toc-label">Contents</p>
+    <ol>
+      <li><a href="#overview">How the collector works</a></li>
+      <li class="part">Part 1 · Daily</li>
+      <li><a href="#daily-check">Daily CLI check</a></li>
+      <li><a href="#sentinel-check">End-to-end check in Sentinel</a></li>
+      <li><a href="#emergency">Emergency: disk full</a></li>
+      <li class="part">Part 2 · Monitoring</li>
+      <li><a href="#monitoring-plan">What breaks and how we'll know</a></li>
+      <li><a href="#signals">Signals to collect</a></li>
+      <li><a href="#changes">Collector and DCR changes</a></li>
+      <li><a href="#alerts">Alert rules</a></li>
+      <li><a href="#rollout">Rollout plan</a></li>
+      <li><a href="#sources">Sources</a></li>
+    </ol>
+  </div>
+</nav>
+
+<main>
+
+<section id="overview" aria-labelledby="h-overview">
+  <h2 id="h-overview">How the collector works</h2>
+  <p>Every event enters on port 514 and leaves through AMA by one of two paths, and each check below looks at one stage of them. Palo Alto threat, URL and traffic logs are written to files that AMA reads; everything else is forwarded straight to AMA.</p>
+
+  <figure class="figure">
+    <p class="fig-title">Palo Alto logs go through files on disk; the rest goes straight to AMA</p>
+    <div class="fig-scroll">
+      <svg class="flow" viewBox="0 40 760 736" role="img" aria-labelledby="flow-title">
+        <title id="flow-title">Palo Alto logs go through files on disk; the rest goes straight to AMA</title>
+        <defs>
+          <marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-arrow" d="M0 0L10 5L0 10z"></path>
+          </marker>
+        </defs>
+        <rect class="dg-frame" x="24" y="216" width="712" height="368" rx="8"></rect>
+        <text class="dg-name" x="40" y="240">Collector ip-10-29-1-71</text>
+        <rect class="dg-frame" x="24" y="616" width="712" height="144" rx="8"></rect>
+        <text class="dg-name" x="380" y="640" text-anchor="middle">Sentinel workspace</text>
+
+        <g class="dg-edge">
+          <path d="M132 112V136" marker-end="url(#flow-arrow)"></path>
+          <path d="M380 112V136" marker-end="url(#flow-arrow)"></path>
+          <path d="M628 112V136" marker-end="url(#flow-arrow)"></path>
+          <path d="M380 192V256" marker-end="url(#flow-arrow)"></path>
+          <path d="M300 312V332H200V352" marker-end="url(#flow-arrow)"></path>
+          <path d="M460 312V332H560V352" marker-end="url(#flow-arrow)"></path>
+          <path d="M200 440V460H300V480" marker-end="url(#flow-arrow)"></path>
+          <path d="M560 440V460H460V480" marker-end="url(#flow-arrow)"></path>
+          <path d="M300 568V600H200V656" marker-end="url(#flow-arrow)"></path>
+          <path d="M460 568V600H560V656" marker-end="url(#flow-arrow)"></path>
+        </g>
+
+        <rect class="dg-box" x="24" y="56" width="216" height="56" rx="8"></rect>
+        <text class="dg-name" x="132" y="80" text-anchor="middle">Palo Alto firewalls</text>
+        <text class="dg-line" x="132" y="96" text-anchor="middle">native CSV, facility user</text>
+
+        <rect class="dg-box" x="272" y="56" width="216" height="56" rx="8"></rect>
+        <text class="dg-name" x="380" y="80" text-anchor="middle">Check Point</text>
+        <text class="dg-line" x="380" y="96" text-anchor="middle">CEF</text>
+
+        <rect class="dg-box" x="520" y="56" width="216" height="56" rx="8"></rect>
+        <text class="dg-name" x="628" y="80" text-anchor="middle">Other syslog senders</text>
+        <text class="dg-line" x="628" y="96" text-anchor="middle">plain syslog</text>
+
+        <rect class="dg-box" x="24" y="136" width="712" height="56" rx="8"></rect>
+        <text class="dg-name" x="380" y="160" text-anchor="middle">Internal NLB (AWS)</text>
+        <text class="dg-line" x="380" y="176" text-anchor="middle">10.29.1.21 and 10.29.1.90, one per zone · TCP and UDP 514</text>
+
+        <rect class="dg-box" x="210" y="256" width="340" height="56" rx="8"></rect>
+        <text class="dg-name" x="380" y="280" text-anchor="middle">rsyslog, port 514</text>
+        <text class="dg-line" x="380" y="296" text-anchor="middle">rules in /etc/rsyslog.d, in file-name order</text>
+
+        <rect class="dg-hot" x="40" y="352" width="320" height="88" rx="8"></rect>
+        <text class="dg-name" x="200" y="376" text-anchor="middle">Palo Alto threat, URL, traffic</text>
+        <text class="dg-line hot" x="200" y="392" text-anchor="middle">written to files by 05-paloalto.conf</text>
+        <text class="dg-line hot" x="200" y="408" text-anchor="middle">one per firewall and type, under /var/log/pan</text>
+        <text class="dg-line hot" x="200" y="424" text-anchor="middle">rotated daily or at 5 GB, kept 3 days</text>
+
+        <rect class="dg-box" x="400" y="352" width="320" height="88" rx="8"></rect>
+        <text class="dg-name" x="560" y="376" text-anchor="middle">Everything else</text>
+        <text class="dg-line" x="560" y="392" text-anchor="middle">forwarded by 10-azuremonitoragent-omfwd.conf</text>
+        <text class="dg-line" x="560" y="408" text-anchor="middle">queue: 25,000 messages in memory,</text>
+        <text class="dg-line" x="560" y="424" text-anchor="middle">then up to 1 GB in /var/spool/rsyslog</text>
+
+        <rect class="dg-box" x="180" y="480" width="400" height="88" rx="8"></rect>
+        <text class="dg-name" x="380" y="504" text-anchor="middle">Azure Monitor Agent (AMA)</text>
+        <text class="dg-line" x="380" y="520" text-anchor="middle">reads the files through the text-log DCRs</text>
+        <text class="dg-line" x="380" y="536" text-anchor="middle">takes the rest on TCP 127.0.0.1:28330</text>
+        <text class="dg-line" x="380" y="552" text-anchor="middle">buffers up to 10 GB if Azure is unreachable</text>
+
+        <rect class="dg-box" x="40" y="656" width="320" height="88" rx="8"></rect>
+        <text class="dg-name" x="200" y="680" text-anchor="middle">Palo Alto tables</text>
+        <text class="dg-line" x="200" y="696" text-anchor="middle">PaloAltoThreat_CL</text>
+        <text class="dg-line" x="200" y="712" text-anchor="middle">PaloAltoUrlFiltering_CL (DCR to build)</text>
+        <text class="dg-line" x="200" y="728" text-anchor="middle">PaloAltoTraffic_CL</text>
+
+        <rect class="dg-box" x="400" y="656" width="320" height="88" rx="8"></rect>
+        <text class="dg-name" x="560" y="680" text-anchor="middle">Standard tables</text>
+        <text class="dg-line" x="560" y="696" text-anchor="middle">Syslog</text>
+        <text class="dg-line" x="560" y="712" text-anchor="middle">CommonSecurityLog (CEF)</text>
+        <text class="dg-line" x="560" y="728" text-anchor="middle">Heartbeat, sent by AMA itself</text>
+      </svg>
+    </div>
+    <figcaption>The left path depends on the local disk: when the files can't be written or rotated, the Palo Alto logs stop, which is what happened in October. The right path depends on AMA's port 28330 and the queue in front of it.</figcaption>
+  </figure>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Item</th><th>Where</th></tr></thead>
+      <tbody>
+        <tr><td class="key">Collectors</td><td><code>ip-10-29-1-71</code> (10.29.1.71); the second collector is being rebuilt to replace 10.29.1.5</td></tr>
+        <tr><td class="key">Entry point</td><td>Internal NLB 10.29.1.21 and 10.29.1.90, TCP and UDP 514</td></tr>
+        <tr><td class="key">Palo Alto routing</td><td><code>/<wbr>etc/<wbr>rsyslog.d/<wbr>05-paloalto.conf</code></td></tr>
+        <tr><td class="key">Palo Alto files</td><td><code>/<wbr>var/<wbr>log/<wbr>pan/<wbr>&lt;type&gt;/<wbr>user/<wbr>&lt;firewall FQDN&gt;.log</code>, where type is threat, url or traffic</td></tr>
+        <tr><td class="key">Forward to AMA</td><td><code>/<wbr>etc/<wbr>rsyslog.d/<wbr>10-azuremonitoragent-omfwd.conf</code> (managed by AMA), TCP 127.0.0.1:28330</td></tr>
+        <tr><td class="key">rsyslog to AMA queue</td><td>25,000 messages in memory, then up to 1 GB on disk in <code>/<wbr>var/<wbr>spool/<wbr>rsyslog</code></td></tr>
+        <tr><td class="key">AMA logs and cache</td><td><code>/<wbr>var/<wbr>opt/<wbr>microsoft/<wbr>azuremonitoragent/<wbr>log/<wbr></code>, cache <code>/<wbr>var/<wbr>opt/<wbr>microsoft/<wbr>azuremonitoragent/<wbr>events</code> (10 GB limit)</td></tr>
+        <tr><td class="key">AMA's copy of the DCRs</td><td><code>/<wbr>etc/<wbr>opt/<wbr>microsoft/<wbr>azuremonitoragent/<wbr>config-cache/<wbr>configchunks/<wbr></code></td></tr>
+        <tr><td class="key">Rotation</td><td><code>/<wbr>etc/<wbr>logrotate.d/<wbr>pan-rsyslog</code> (daily or at 5 GB, keep 3 days), <code>logrotate.timer</code> hourly; logrotate.service carries the no-timeout drop-in</td></tr>
+        <tr><td class="key">Workspace</td><td>alp-law-sentinel-prod-01, switzerlandnorth</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="daily-check" aria-labelledby="h-daily">
+  <div class="part-break">
+    <p class="eyebrow">Part 1 · Daily</p>
+    <h2 id="h-daily">Daily CLI check</h2>
+  </div>
+  <p>Paste this block on each collector; every numbered result should match the Good column below. Use it daily, and any time you don't know the collector's state.</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c"># 1 Disk and inodes (the root disk holds /var/log)</span>
+df -h / ; df -i /
+<span class="c"># 2 Services</span>
+systemctl is-active rsyslog azuremonitoragent himdsd
+systemctl --failed --no-pager --plain | head
+<span class="c"># 3 Arc connection (AMA needs it to send)</span>
+sudo azcmagent show | grep -iE "agent status|last heartbeat"
+<span class="c"># 4 Listening ports</span>
+sudo ss -lntup | grep -E ':(514|28330) '
+<span class="c"># 5 Palo Alto files: written in the last 5 min / silent over 1 h / over 6 GB / size per type</span>
+sudo find /var/log/pan -name '*.log' -mmin -5 | wc -l
+sudo find /var/log/pan -name '*.log' -mmin +60
+sudo find /var/log/pan -name '*.log' -size +6G
+sudo sh -c 'du -sh /var/log/pan/*/user'
+<span class="c"># 6 Rotation</span>
+systemctl show logrotate.service -p Result -p ExecMainExitTimestamp
+systemctl list-timers logrotate.timer --no-pager | head -2
+<span class="c"># 7 rsyslog: warnings in the last 24 h, queue spilled to disk, config valid</span>
+sudo journalctl -u rsyslog --since -24h -p warning --no-pager | tail -5
+sudo du -sh /var/spool/rsyslog
+sudo rsyslogd -N1 2&gt;&amp;1 | grep -iE "error|warn" || echo "config OK"
+<span class="c"># 8 AMA: latest errors, upload cache size</span>
+sudo tail -n 5 /var/opt/microsoft/azuremonitoragent/log/mdsd.err
+sudo du -sh /var/opt/microsoft/azuremonitoragent/events
+<span class="c"># 9 Load, memory, clock</span>
+uptime ; free -h | head -2 ; timedatectl | grep -i synchronized</code></pre></div>
+  <div class="table-wrap">
+    <table class="wide">
+      <thead><tr><th>#</th><th>Check</th><th class="good">Good</th><th class="ifnot">If not</th></tr></thead>
+      <tbody>
+        <tr><td class="num"><span class="n">1</span></td><td class="key">Disk</td><td>Use% under 80% for both space and inodes</td><td>80 to 90%: find what grew (commands in the emergency section). Over 90%: emergency section now</td></tr>
+        <tr><td class="num"><span class="n">2</span></td><td class="key">Services</td><td>Three lines <code>active</code>; <code>0 loaded units listed</code></td><td><code>sudo systemctl restart &lt;service&gt;</code>, then <code>journalctl -u &lt;service&gt; -n 50</code>. A failed <code>logrotate.service</code> means rotation has stopped and the disk will fill</td></tr>
+        <tr><td class="num"><span class="n">3</span></td><td class="key">Arc</td><td><code>Connected</code>, last heartbeat a few minutes old</td><td><code>Disconnected</code> or <code>Expired</code> stops AMA from sending. Run <code>sudo azcmagent check</code>; an expired certificate needs a reconnect, as on 10.29.1.5</td></tr>
+        <tr><td class="num"><span class="n">4</span></td><td class="key">Ports</td><td>rsyslogd on 514 TCP and UDP; mdsd (AMA) on 127.0.0.1:28330</td><td>No 514: restart rsyslog; nothing reaches this collector without it. No 28330: restart azuremonitoragent</td></tr>
+        <tr><td class="num"><span class="n">5</span></td><td class="key">Palo Alto files</td><td>First number: roughly one per firewall and log type. Second and third commands print nothing. Each type a few GB</td><td>A file silent over 1 h: that firewall stopped sending, check its log forwarding. All silent: rsyslog or the NLB. A file over 6 GB: rotation is not running (check 6)</td></tr>
+        <tr><td class="num"><span class="n">6</span></td><td class="key">Rotation</td><td><code>Result=success</code>, last run and NEXT both within the hour</td><td><code>systemctl status logrotate.service</code> shows the error. <code>timeout</code> means the no-timeout drop-in is missing</td></tr>
+        <tr><td class="num"><span class="n">7</span></td><td class="key">rsyslog</td><td>No warnings; spool a few KB; <code>config OK</code></td><td><code>suspended</code> or <code>No space left</code> in the warnings: an output is failing (disk or the AMA port). Spool growing: AMA is not taking data, go to check 8</td></tr>
+        <tr><td class="num"><span class="n">8</span></td><td class="key">AMA</td><td>No errors from today; cache well under 10 GB</td><td><code>sudo systemctl restart azuremonitoragent</code>. Cache growing: AMA can't upload (Arc, network or workspace)</td></tr>
+        <tr><td class="num"><span class="n">9</span></td><td class="key">Load, memory, clock</td><td>Load under 2 (2 vCPU); over 1 GB available; <code>synchronized: yes</code></td><td>Load over 2 for long: the box is undersized for the event rate. Clock not synced breaks timestamps and Azure sign-in</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="sentinel-check" aria-labelledby="h-sentinel">
+  <h2 id="h-sentinel">End-to-end check in Sentinel</h2>
+  <p>The CLI check shows the collector is healthy; these two queries show the data is actually arriving. Run them in the workspace's Logs after the CLI check.</p>
+  <p>The first lists every source that sent in the last 24 hours, longest silence first. Anything silent for over 60 minutes needs a look. A whole table silent points at the collector or that table's DCR; one firewall silent points at that firewall.</p>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Every source seen in the last 24 h, longest-silent first</span>
+let window = 24h;
+union isfuzzy=true
+    (Heartbeat | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = Computer | extend Table = "Heartbeat"),
+    (Syslog | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = strcat(HostName, " / ", Facility) | extend Table = "Syslog"),
+    (CommonSecurityLog | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = strcat(DeviceVendor, " ", DeviceProduct, " / ", Computer) | extend Table = "CommonSecurityLog"),
+    (PaloAltoThreat_CL | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = Computer | extend Table = "PaloAltoThreat_CL"),
+    (PaloAltoUrlFiltering_CL | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = Computer | extend Table = "PaloAltoUrlFiltering_CL"),
+    (PaloAltoTraffic_CL | where TimeGenerated &gt; ago(window)
+        | summarize Last = max(TimeGenerated) by Source = Computer | extend Table = "PaloAltoTraffic_CL")
+| extend MinutesSilent = datetime_diff('minute', now(), Last)
+| project Table, Source, Last, MinutesSilent
+| order by MinutesSilent desc</code></pre></div>
+  <p>The second charts ingested volume per table per hour over 3 days. A dip or a flat line shows partial loss that the first query can miss, because a source can still send a little while most of its data is lost.</p>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Ingested MB per table per hour, last 3 days</span>
+Usage
+| where TimeGenerated &gt; ago(3d)
+| where DataType in ("Syslog", "CommonSecurityLog", "PaloAltoThreat_CL", "PaloAltoUrlFiltering_CL", "PaloAltoTraffic_CL")
+| summarize MB = sum(Quantity) by DataType, bin(TimeGenerated, 1h)
+| render timechart</code></pre></div>
+  <p class="note">If a table is on the data lake tier, queries on it are billed per GB scanned. A 24-hour scan of the traffic table reads a full day of it, 50 GB or more, so drop that line if the cost matters.</p>
+</section>
+
+<section id="emergency" aria-labelledby="h-emergency">
+  <h2 id="h-emergency">Emergency: disk over 90% or full</h2>
+  <p>A full disk stops rsyslog from writing the Palo Alto files and stops AMA from buffering, so logs are lost until space comes back. Free space first and find the cause second.</p>
+  <div class="steps">
+    <div class="step">
+      <h3><span class="n">1</span> Free space now</h3>
+      <p>Empty the biggest live traffic files, largest first:</p>
+      <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>sudo sh -c 'ls -lhS /var/log/pan/traffic/user/ | head'
+sudo truncate -s 0 '/var/log/pan/traffic/user/&lt;firewall FQDN&gt;.log'
+<span class="c"># or every traffic file at once:</span>
+sudo sh -c 'truncate -s 0 /var/log/pan/traffic/user/*.log'
+df -h /</code></pre></div>
+      <p>Use <code>truncate</code>, never <code>rm</code>. rsyslog and AMA keep the files open, so <code>rm</code> frees nothing until they restart, while <code>truncate</code> frees the space at once and both carry on writing and reading the same file. Lines AMA hadn't sent yet are lost, so empty traffic files before threat files.</p>
+    </div>
+    <div class="step">
+      <h3><span class="n">2</span> Find what filled it</h3>
+      <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>sudo du -xah / 2&gt;/dev/null | sort -h | tail -25
+sudo lsof -nP +L1 2&gt;/dev/null | awk 'NR==1 || $7 &gt; 1e9'</code></pre></div>
+      <p>The first command lists the biggest folders and files on the root disk. The second lists deleted files that a process still holds open; that space only comes back when the process restarts, usually <code>sudo systemctl restart rsyslog</code>.</p>
+    </div>
+    <div class="step">
+      <h3><span class="n">3</span> Check that logging recovered</h3>
+      <p>Rerun checks 2, 5 and 7 of the daily check. The live files should be growing again within a minute; if not, restart rsyslog, then azuremonitoragent.</p>
+    </div>
+    <div class="step">
+      <h3><span class="n">4</span> Fix the cause</h3>
+      <p>In October it was rotation (check 6). Start a run and watch it until it shows <code>inactive (dead)</code> with <code>status=0/<wbr>SUCCESS</code>:</p>
+      <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>sudo systemctl start --no-block logrotate.service
+systemctl status logrotate.service --no-pager -n 5</code></pre></div>
+      <p>Files ending in <code>.backup</code> under <code>/<wbr>var/<wbr>log/<wbr>pan</code> are half-compressed leftovers of a rotation that was killed; delete them.</p>
+    </div>
+  </div>
+</section>
+
+<section id="monitoring-plan" aria-labelledby="h-plan">
+  <div class="part-break">
+    <p class="eyebrow">Part 2 · Monitoring</p>
+    <h2 id="h-plan">What breaks and how we'll know</h2>
+  </div>
+  <p>The goal is an alert within about 15 minutes for every failure that has hit this setup or could, built on data AMA already sends or can send with three changes. Those changes are a small new DCR, rsyslog's own statistics, and alert rules. The table lists each failure, the signal that shows it, and the alert defined further down.</p>
+  <div class="table-wrap">
+    <table class="wide">
+      <thead><tr><th>What breaks</th><th>Signal that shows it</th><th>Alert</th><th>Alert within</th></tr></thead>
+      <tbody>
+        <tr><td>Disk fills (the October incident)</td><td>Perf <code>% Used Space</code> on <code>/<wbr></code></td><td class="key">Disk filling</td><td>15 min after it passes 80%</td></tr>
+        <tr><td>Rotation stops (the 5-minute timeout)</td><td>systemd logs <code>Failed with result</code></td><td class="key">Service failed</td><td>15 min after the failed run</td></tr>
+        <tr><td>Collector, AMA or Arc down</td><td>Heartbeat missing</td><td class="key">Collector silent</td><td>10 to 15 min</td></tr>
+        <tr><td>rsyslog down, or it can't hand data to AMA</td><td>rsyslog statistics missing while Heartbeat still arrives</td><td class="key">rsyslog not reporting</td><td>10 to 15 min</td></tr>
+        <tr><td>The rsyslog to AMA queue backs up or drops messages</td><td>Queue size, full and discarded counters</td><td class="key">rsyslog queue trouble</td><td>15 min</td></tr>
+        <tr><td>Writing the Palo Alto files fails</td><td>Output failed and suspended counters, rsyslog's own errors</td><td class="key">rsyslog output failing</td><td>15 min</td></tr>
+        <tr><td>Nothing arrives on port 514 (NLB, network, all senders)</td><td>Input counters at zero</td><td class="key">No input</td><td>15 min</td></tr>
+        <tr><td>One firewall or device stops sending</td><td>Last event per source</td><td class="key">Source silent</td><td>60 to 75 min</td></tr>
+        <tr><td>A table loses part of its data</td><td>Hourly volume against the same hours yesterday</td><td class="key">Volume drop</td><td>1 to 3 h</td></tr>
+        <tr><td>A DCR drops rows or fails its transformation</td><td>DCR metrics and error log</td><td class="key">DCR errors</td><td>5 to 15 min</td></tr>
+        <tr><td>The NLB marks a collector unhealthy</td><td>AWS target health</td><td class="key">CloudWatch alarm (AWS side)</td><td>5 min</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="signals" aria-labelledby="h-signals">
+  <h2 id="h-signals">Signals to collect</h2>
+  <p>Everything the alerts need either already reaches the workspace or arrives through one new DCR, so nothing new has to be installed on the collectors. The rsyslog statistics travel the same path as the logs, so when that path breaks the statistics stop too. That silence is itself the alarm, and the Heartbeat, which AMA sends directly, tells the two cases apart.</p>
+  <div class="table-wrap">
+    <table class="wide">
+      <thead><tr><th>Signal</th><th>Collected by</th><th>Lands in</th><th>Change needed</th></tr></thead>
+      <tbody>
+        <tr><td>Disk and inodes, memory, CPU, bytes received</td><td>AMA performance counters, every 60 s</td><td>Perf</td><td>New collector-health DCR</td></tr>
+        <tr><td>AMA alive</td><td>AMA, every minute</td><td>Heartbeat</td><td>None</td></tr>
+        <tr><td>rsyslog queues, inputs and outputs</td><td>rsyslog <code>impstats</code> module, every 60 s, JSON, facility syslog</td><td>Syslog, ProcessName <code>rsyslogd-pstats</code></td><td><code>00-impstats.conf</code>, and facility syslog in the new DCR</td></tr>
+        <tr><td>rsyslog errors and warnings</td><td>rsyslog itself, facility syslog</td><td>Syslog, ProcessName <code>rsyslogd</code></td><td>Same DCR</td></tr>
+        <tr><td>Service failures (logrotate, rsyslog, AMA)</td><td>systemd, facility daemon, Warning and above</td><td>Syslog, ProcessName <code>systemd</code></td><td>Same DCR</td></tr>
+        <tr><td>Palo Alto file ages and sizes, rotation result</td><td>Optional <code>collector-health</code> script every 5 min, through <code>logger</code></td><td>Syslog, ProcessName <code>collector-health</code></td><td>Script and timer (optional)</td></tr>
+        <tr><td>Last event per source</td><td>Data already ingested</td><td>Syslog, CommonSecurityLog, Palo Alto tables</td><td>None</td></tr>
+        <tr><td>Volume per table per hour</td><td>Azure, automatically</td><td>Usage</td><td>None</td></tr>
+        <tr><td>Rows dropped, transformation errors</td><td>Azure Monitor DCR metrics; Log errors diagnostic setting</td><td>Metrics; DCRLogErrors</td><td>Diagnostic setting on each DCR</td></tr>
+        <tr><td>NLB target health</td><td>AWS</td><td>CloudWatch</td><td>CloudWatch alarm</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Alert rules can't read tables on the data lake tier: when a table moves there, "all real-time analytics and hunting queries stop working" (<a href="https://learn.microsoft.com/en-in/azUre/sentinel/manage-data-overview" target="_blank" rel="noopener">Microsoft Learn</a>). If the Palo Alto tables stay on that tier, the collector-health script's per-file ages are what tells you a firewall went quiet.</p>
+</section>
+
+<section id="changes" aria-labelledby="h-changes">
+  <h2 id="h-changes">Collector and DCR changes</h2>
+  <p>The plan needs one small file on each collector and one new DCR, and it leaves the existing DCRs and the Palo Alto rules untouched.</p>
+  <div class="step">
+    <h3>1. rsyslog statistics on each collector</h3>
+    <p>This turns on rsyslog's <code>impstats</code> module. Restart at a quiet moment, because UDP senders lose the second or two a restart takes.</p>
+    <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>sudo tee /etc/rsyslog.d/00-impstats.conf &gt; /dev/null &lt;&lt;'EOF'
+<span class="c"># rsyslog health counters every 60 s as JSON (facility syslog, tag rsyslogd-pstats).</span>
+<span class="c"># AMA sends them to the Syslog table through the collector-health DCR.</span>
+module(load="impstats" interval="60" resetCounters="on" format="json")
+EOF
+sudo rsyslogd -N1 2&gt;&amp;1 | grep -iE "error|warn" || echo "config OK"
+sudo systemctl restart rsyslog
+sleep 70; sudo grep rsyslogd-pstats /var/log/syslog | tail -3</code></pre></div>
+    <p>Every minute rsyslog then logs about 20 lines like <code>{ "name": "main Q", "origin": "core.queue", "size": 16, "full": 0, "discarded.full": 0, ... }</code>, one per queue, input and output. Tested on rsyslog 8.2312. <code>resetCounters</code> makes each line a count for that minute, which keeps the alert queries simple.</p>
+  </div>
+  <div class="step">
+    <h3>2. New DCR, collector-health</h3>
+    <p>Name it <code>alp-dcr-sentinel-prod-01-linux-collector-health</code>, kind Linux, with the same workspace destination as the others, and associate it with every collector. It holds performance counters plus two syslog facilities that no existing DCR collects, so nothing is ingested twice.</p>
+    <div class="code"><div class="code-bar"><span class="lang">json</span><button type="button" class="copy">Copy</button></div><pre><code>"dataSources": {
+  "performanceCounters": [
+    { "name": "collectorPerf", "streams": ["Microsoft-Perf"], "samplingFrequencyInSeconds": 60,
+      "counterSpecifiers": [
+        "Logical Disk(*)\\% Used Space",
+        "Logical Disk(*)\\% Used Inodes",
+        "Logical Disk(*)\\Free Megabytes",
+        "Memory(*)\\% Used Memory",
+        "Memory(*)\\Available MBytes Memory",
+        "Processor(*)\\% Processor Time",
+        "Network(*)\\Total Bytes Received" ] }
+  ],
+  "syslog": [
+    { "name": "rsyslogHealth", "streams": ["Microsoft-Syslog"], "facilityNames": ["syslog"],
+      "logLevels": ["Info", "Notice", "Warning", "Error", "Critical", "Alert", "Emergency"] },
+    { "name": "serviceFailures", "streams": ["Microsoft-Syslog"], "facilityNames": ["daemon"],
+      "logLevels": ["Warning", "Error", "Critical", "Alert", "Emergency"] }
+  ]
+},
+"dataFlows": [
+  { "streams": ["Microsoft-Perf"], "destinations": ["la-sentinel"] },
+  { "streams": ["Microsoft-Syslog"], "destinations": ["la-sentinel"],
+    "transformKql": "source | where ProcessName in ('rsyslogd', 'rsyslogd-pstats', 'systemd', 'collector-health')" }
+]</code></pre></div>
+    <p>The transformation keeps only the collectors' own messages, so a remote device that happens to log with facility daemon or syslog isn't ingested.</p>
+  </div>
+  <div class="step">
+    <h3>3. Error logging on every DCR</h3>
+    <p>On each DCR (CEF, syslog, Palo Alto threat, traffic and URL, collector-health), open Diagnostic settings, select Log Errors and send it to the workspace. Failed rows then land in the DCRLogErrors table with the reason.</p>
+  </div>
+  <div class="step">
+    <h3>4. Optional: collector-health script</h3>
+    <p>A systemd timer runs a short script every 5 minutes. It logs one JSON line per Palo Alto file with the type, firewall, size and minutes since the last write, plus the last logrotate result and the AMA cache and rsyslog spool sizes. It sends them with <code>logger -p syslog.info -t collector-health</code>, so the same DCR picks them up. This gives per-firewall freshness whatever tier the Palo Alto tables are on.</p>
+  </div>
+</section>
+
+<section id="alerts" aria-labelledby="h-alerts">
+  <h2 id="h-alerts">Alert rules</h2>
+  <p>Create each rule below as an Azure Monitor log search alert on the workspace, with the condition "number of results greater than 0". Point every rule at one action group (email plus the team's Teams channel). Each query returns rows only when something is wrong, and the rows say what. Log search alerts read at most two days back (<a href="https://learn.microsoft.com/en-us/azure/azure-monitor/app/alerts" target="_blank" rel="noopener">Microsoft Learn</a>), which is why the volume rule compares with yesterday rather than last week.</p>
+  <div class="table-wrap">
+    <table class="wide">
+      <thead><tr><th>Alert</th><th>Runs every</th><th>Severity</th><th>First response</th></tr></thead>
+      <tbody>
+        <tr><td class="key"><a href="#q-disk">Disk filling</a></td><td class="tight">5 min</td><td><span class="sev s2">Sev 2</span> at 80%, <span class="sev s1">Sev 1</span> at 90%</td><td>Emergency section</td></tr>
+        <tr><td class="key"><a href="#q-service">Service failed</a></td><td class="tight">5 min</td><td><span class="sev s2">Sev 2</span></td><td><code>systemctl status</code> on that unit; for logrotate, check 6</td></tr>
+        <tr><td class="key"><a href="#q-heartbeat">Collector silent</a></td><td class="tight">5 min</td><td><span class="sev s1">Sev 1</span></td><td>Checks 2, 3 and 8</td></tr>
+        <tr><td class="key"><a href="#q-reporting">rsyslog not reporting</a></td><td class="tight">5 min</td><td><span class="sev s1">Sev 1</span></td><td>Checks 2, 4 and 7</td></tr>
+        <tr><td class="key"><a href="#q-queue">rsyslog queue trouble</a></td><td class="tight">5 min</td><td><span class="sev s2">Sev 2</span></td><td>Checks 7 and 8</td></tr>
+        <tr><td class="key"><a href="#q-output">rsyslog output failing</a></td><td class="tight">5 min</td><td><span class="sev s2">Sev 2</span></td><td>Checks 1, 5 and 7</td></tr>
+        <tr><td class="key"><a href="#q-input">No input</a></td><td class="tight">5 min</td><td><span class="sev s1">Sev 1</span></td><td>NLB target health, then check 4</td></tr>
+        <tr><td class="key"><a href="#q-source">Source silent</a></td><td class="tight">15 min</td><td><span class="sev s3">Sev 3</span></td><td>That sender's log forwarding</td></tr>
+        <tr><td class="key"><a href="#q-volume">Volume drop</a></td><td class="tight">1 h</td><td><span class="sev s3">Sev 3</span></td><td>The Sentinel check queries</td></tr>
+        <tr><td class="key"><a href="#q-dcr">DCR errors</a></td><td class="tight">Metric, 5 min</td><td><span class="sev s2">Sev 2</span></td><td>DCRLogErrors for the reason</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Two queries list the collectors by name; add the new collector there once it's built, spelled as <code>Heartbeat | distinct Computer</code> shows it. The rsyslog error rule will catch some harmless warnings at first, so tune it after the first week.</p>
+
+  <div class="query" id="q-disk">
+    <h3>Disk filling <span class="sev s2">Sev 2</span> <span class="sev s1">Sev 1</span></h3>
+    <p>Create it twice: 80% at severity 2 and 90% at severity 1.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>Perf
+| where TimeGenerated &gt; ago(15m)
+| where ObjectName == "Logical Disk" and CounterName == "% Used Space" and InstanceName == "/"
+| summarize UsedPct = round(max(CounterValue), 1) by Computer
+| where UsedPct &gt;= 80</code></pre></div>
+  </div>
+  <div class="query" id="q-service">
+    <h3>Service failed <span class="sev s2">Sev 2</span></h3>
+    <p>Any systemd unit failure on a collector, such as the logrotate timeout, an rsyslog crash or an AMA crash.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>Syslog
+| where TimeGenerated &gt; ago(15m) and ProcessName == "systemd"
+| where SyslogMessage contains "Failed with result" or SyslogMessage contains "Failed to start"
+| project TimeGenerated, HostName, SyslogMessage</code></pre></div>
+  </div>
+  <div class="query" id="q-heartbeat">
+    <h3>Collector silent <span class="sev s1">Sev 1</span></h3>
+    <p>No Heartbeat for 10 minutes, which means the VM, AMA or the Arc connection is down.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>let collectors = datatable(Computer: string) ["ip-10-29-1-71"];
+collectors
+| join kind=leftouter (
+    Heartbeat | where TimeGenerated &gt; ago(30m) | summarize Last = max(TimeGenerated) by Computer
+  ) on Computer
+| where isnull(Last) or Last &lt; ago(10m)
+| project Computer, Last</code></pre></div>
+  </div>
+  <div class="query" id="q-reporting">
+    <h3>rsyslog not reporting <span class="sev s1">Sev 1</span></h3>
+    <p>AMA is alive but rsyslog's statistics stopped, so rsyslog is down or can't hand data to AMA.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>let collectors = datatable(Computer: string) ["ip-10-29-1-71"];
+let alive = Heartbeat | where TimeGenerated &gt; ago(10m) | distinct Computer;
+let reporting = Syslog | where TimeGenerated &gt; ago(10m) and ProcessName == "rsyslogd-pstats"
+    | project Computer = HostName | distinct Computer;
+collectors
+| where Computer in (alive) and Computer !in (reporting)</code></pre></div>
+  </div>
+  <div class="query" id="q-queue">
+    <h3>rsyslog queue trouble <span class="sev s2">Sev 2</span></h3>
+    <p>A queue was full or dropped messages, holds over 20,000 messages (the AMA queue holds 25,000 in memory), or spilled to disk.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>Syslog
+| where TimeGenerated &gt; ago(15m) and ProcessName == "rsyslogd-pstats"
+| extend s = parse_json(SyslogMessage)
+| where tostring(s.origin) == "core.queue"
+| summarize MaxSize = max(toint(s.size)), Full = sum(toint(s.full)),
+            Discarded = sum(toint(s["discarded.full"]) + toint(s["discarded.nf"]))
+    by HostName, Queue = tostring(s.name)
+| where Full &gt; 0 or Discarded &gt; 0 or MaxSize &gt; 20000 or (Queue endswith "[DA]" and MaxSize &gt; 0)</code></pre></div>
+  </div>
+  <div class="query" id="q-output">
+    <h3>rsyslog output failing <span class="sev s2">Sev 2</span></h3>
+    <p>An output, such as the Palo Alto files or the AMA port, reported failures or suspensions, or rsyslog logged a warning or error.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>let counters = Syslog
+    | where TimeGenerated &gt; ago(15m) and ProcessName == "rsyslogd-pstats"
+    | extend s = parse_json(SyslogMessage)
+    | where tostring(s.origin) == "core.action"
+    | summarize Failed = sum(tolong(s.failed)), Suspended = sum(tolong(s.suspended)) by HostName, Output = tostring(s.name)
+    | where Failed &gt; 0 or Suspended &gt; 0
+    | project HostName, Detail = strcat(Output, ": failed ", Failed, ", suspended ", Suspended);
+let messages = Syslog
+    | where TimeGenerated &gt; ago(15m) and ProcessName == "rsyslogd"
+    | where SeverityLevel in ("warning", "err", "crit", "alert", "emerg")
+    | project HostName, Detail = SyslogMessage;
+union counters, messages</code></pre></div>
+  </div>
+  <div class="query" id="q-input">
+    <h3>No input <span class="sev s1">Sev 1</span></h3>
+    <p>The port 514 listeners received nothing for 15 minutes.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>Syslog
+| where TimeGenerated &gt; ago(15m) and ProcessName == "rsyslogd-pstats"
+| extend s = parse_json(SyslogMessage)
+| where tostring(s.origin) in ("imudp", "imtcp") and isnotnull(s.submitted)
+| summarize Received = sum(tolong(s.submitted)) by HostName
+| where Received == 0</code></pre></div>
+  </div>
+  <div class="query" id="q-source">
+    <h3>Source silent <span class="sev s3">Sev 3</span></h3>
+    <p>A regular sender, meaning one active in at least 20 of the last 24 hours, has been silent for 60 minutes. It only covers tables on the analytics tier.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>let silentAfter = 60m;
+let lookback = 1d;
+union isfuzzy=true
+    (Syslog | where TimeGenerated &gt; ago(lookback)
+        | summarize Last = max(TimeGenerated), ActiveHours = dcount(bin(TimeGenerated, 1h)) by Source = strcat("Syslog / ", HostName, " / ", Facility)),
+    (CommonSecurityLog | where TimeGenerated &gt; ago(lookback)
+        | summarize Last = max(TimeGenerated), ActiveHours = dcount(bin(TimeGenerated, 1h)) by Source = strcat("CEF / ", DeviceVendor, " / ", Computer)),
+    (PaloAltoThreat_CL | where TimeGenerated &gt; ago(lookback)
+        | summarize Last = max(TimeGenerated), ActiveHours = dcount(bin(TimeGenerated, 1h)) by Source = strcat("PA threat / ", Computer)),
+    (PaloAltoUrlFiltering_CL | where TimeGenerated &gt; ago(lookback)
+        | summarize Last = max(TimeGenerated), ActiveHours = dcount(bin(TimeGenerated, 1h)) by Source = strcat("PA url / ", Computer)),
+    (PaloAltoTraffic_CL | where TimeGenerated &gt; ago(lookback)
+        | summarize Last = max(TimeGenerated), ActiveHours = dcount(bin(TimeGenerated, 1h)) by Source = strcat("PA traffic / ", Computer))
+| where ActiveHours &gt;= 20 and Last &lt; ago(silentAfter)</code></pre></div>
+  </div>
+  <div class="query" id="q-volume">
+    <h3>Volume drop <span class="sev s3">Sev 3</span></h3>
+    <p>A table ingested under a third of what it did in the same 3 hours yesterday. The third leaves room for quieter weekends.</p>
+    <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>let window = 3h;
+Usage
+| where TimeGenerated &gt; ago(window) or TimeGenerated between (ago(1d + window) .. ago(1d))
+| where DataType in ("Syslog", "CommonSecurityLog", "PaloAltoThreat_CL", "PaloAltoUrlFiltering_CL", "PaloAltoTraffic_CL")
+| summarize NowMB = sumif(Quantity, TimeGenerated &gt; ago(window)),
+            YesterdayMB = sumif(Quantity, TimeGenerated &lt;= ago(1d))
+    by DataType
+| where YesterdayMB &gt; 0 and NowMB &lt; YesterdayMB / 3</code></pre></div>
+  </div>
+  <div class="query" id="q-dcr">
+    <h3>DCR errors <span class="sev s2">Sev 2</span></h3>
+    <p>This is a metric alert rather than a query: on each DCR, alert when <code>Logs Rows Dropped per Min</code> or <code>Logs Transformation Errors per Min</code> is above 0 over 5 minutes. The rows themselves and the reason are in DCRLogErrors.</p>
+  </div>
+</section>
+
+<section id="rollout" aria-labelledby="h-rollout">
+  <h2 id="h-rollout">Rollout plan</h2>
+  <p>Roll it out in three steps, starting with the disk, service and heartbeat alerts, because they cover the failures that already happened.</p>
+  <p class="hint">Ticks are saved in this browser only.</p>
+
+  <div class="phase">
+    <h3>Step 1: failures we have already had</h3>
+    <ul class="tasks">
+      <li><label><input type="checkbox" id="s1-dcr"><span>Create the collector-health DCR and associate it with ip-10-29-1-71</span></label></li>
+      <li><label><input type="checkbox" id="s1-ag"><span>Create the action group (email and the team's Teams channel)</span></label></li>
+      <li><label><input type="checkbox" id="s1-alerts"><span>Create Disk filling (80% and 90%), Service failed and Collector silent</span></label></li>
+      <li><label><input type="checkbox" id="s1-dcrerr"><span>Turn on Log Errors for every DCR and create the DCR errors metric alerts</span></label></li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Step 2: rsyslog visibility</h3>
+    <ul class="tasks">
+      <li><label><input type="checkbox" id="s2-impstats"><span>Add <code>00-impstats.conf</code> on each collector and restart rsyslog</span></label></li>
+      <li><label><input type="checkbox" id="s2-confirm"><span>Confirm the statistics arrive and their HostName matches the collector's Computer name in Heartbeat: <code>Syslog | where ProcessName == "rsyslogd-pstats" | take 10</code></span></label></li>
+      <li><label><input type="checkbox" id="s2-alerts"><span>Create rsyslog not reporting, rsyslog queue trouble, rsyslog output failing and No input</span></label></li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Step 3: per-source coverage</h3>
+    <ul class="tasks">
+      <li><label><input type="checkbox" id="s3-source"><span>Create Source silent and Volume drop</span></label></li>
+      <li><label><input type="checkbox" id="s3-tier"><span>Decide the Palo Alto tables' tier; if they stay on the data lake tier, add the collector-health script and a file-age alert on its lines</span></label></li>
+      <li><label><input type="checkbox" id="s3-aws"><span>Create a CloudWatch alarm on the NLB target group for UnHealthyHostCount above 0, once both collectors are in it</span></label></li>
+      <li><label><input type="checkbox" id="s3-new"><span>When the new collector is built, add it to the DCR associations, the two collector lists in the queries and the alarm</span></label></li>
+    </ul>
+  </div>
+
+  <p>Test each rule by lowering its threshold for a moment (disk at 1%, for example) and checking that the email arrives. Don't test by breaking a collector: while only one is up, a real failure loses logs.</p>
+  <p>The extra data is small. By my estimate, performance counters every minute plus about 20 rsyslog statistics lines a minute come to 20 to 40 MB a day per collector, around 1 GB a month.</p>
+</section>
+
+<section id="sources" class="sources" aria-labelledby="h-sources">
+  <h2 id="h-sources">Sources</h2>
+  <ul>
+    <li><a href="https://learn.microsoft.com/en-in/azUre/sentinel/manage-data-overview" target="_blank" rel="noopener">Microsoft Learn: Sentinel data management overview (analytics and data lake tiers)</a></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/app/alerts" target="_blank" rel="noopener">Microsoft Learn: Create or edit a log search alert rule</a></li>
+  </ul>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  // Copy buttons: clipboard inside the click handler, select the text if the clipboard is refused.
+  document.querySelectorAll('.code').forEach(function (block) {
+    var btn = block.querySelector('.copy');
+    var codeEl = block.querySelector('pre code');
+    if (!btn || !codeEl) return;
+    btn.addEventListener('click', function () {
+      var text = codeEl.textContent;
+      function show(label) {
+        btn.textContent = label;
+        btn.setAttribute('data-state', 'done');
+        clearTimeout(btn._t);
+        btn._t = setTimeout(function () { btn.textContent = 'Copy'; btn.removeAttribute('data-state'); }, 1800);
+      }
+      function selectInstead() {
+        try {
+          var range = document.createRange();
+          range.selectNodeContents(codeEl);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (e) {}
+        show('Selected');
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { show('Copied'); }, selectInstead);
+        } else {
+          selectInstead();
+        }
+      } catch (e) {
+        selectInstead();
+      }
+    });
+  });
+
+  // Rollout ticks: remembered per browser; the page works the same without storage.
+  var KEY = 'collector-health-rollout-v1';
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { state = {}; }
+  document.querySelectorAll('.tasks input[type="checkbox"]').forEach(function (box) {
+    if (state[box.id]) box.checked = true;
+    box.addEventListener('change', function () {
+      state[box.id] = box.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    });
+  });
+
+  // Contents: mark the section being read.
+  var links = {};
+  document.querySelectorAll('.toc a[href^="#"]').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var a = links[entry.target.id];
+        if (!a) return;
+        Object.keys(links).forEach(function (k) { links[k].removeAttribute('aria-current'); });
+        a.setAttribute('aria-current', 'true');
+      });
+    }, { rootMargin: '0px 0px -70% 0px' });
+    document.querySelectorAll('main section[id]').forEach(function (s) { observer.observe(s); });
+  }
+})();
+</script>
