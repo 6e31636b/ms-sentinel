@@ -1,97 +1,54 @@
+1. Free space now
 bash
+sudo sh -c 'truncate -s 0 /var/log/pan/traffic/user/*.log'
 df -h /
-sudo du -xh --max-depth=3 /var/log /var/opt/microsoft/azuremonitoragent /var/spool/rsyslog | sort -h | tail -15
 
-Where to check the rotation settings
+Use truncate, not rm. rsyslog and AMA keep these files open, so rm wouldn’t free the space until they restart. Any traffic lines AMA hadn’t sent yet are lost, but there’s no room to keep them anyway.
 
-/etc/logrotate.conf holds the defaults.
-/etc/logrotate.d/ has one file per application. grep -rn "pan\|remotelogs" /etc/logrotate.d/ shows which rule covers your folders, if any. Most likely pan-rsyslog still points at the old /var/log/remotelogs.
-/var/lib/logrotate/status shows when each file was last rotated.
-systemctl list-timers logrotate.timer shows when logrotate runs (once a day on Ubuntu).
+2. Check it recovered (1–2 minutes later)
+bash
+sudo sh -c 'ls -lh /var/log/pan/traffic/user/'     # sizes above 0 = rsyslog is writing again
+systemctl is-active rsyslog azuremonitoragent
 
-Why the script doesn’t help: it never touches /var/log/pan. It empties syslog, auth.log, kern.log and messages, empties the old remotelogs folder, deletes files that were already rotated, and runs only once a week. Live files that nothing rotates just keep growing.
-Second: the fix
+If the sizes are all still 0, run sudo systemctl restart rsyslog. If either service isn’t active, restart that one.
 
-Free up space now (pick one)
+3. Send me screenshots of these
 
-Grow the root disk, which loses nothing. In EC2 → Volumes, modify the root volume’s size, then on the box run sudo growpart /dev/nvme0n1 1 and sudo resize2fs /dev/nvme0n1p1. Check the device names with lsblk first.
-Or empty the traffic files, once Sentinel has caught up. Check that the last line of the file (sudo tail -n1 <file>) and PaloAltoTraffic_CL | summarize max(TimeGenerated) are only minutes apart. Then run sudo truncate -s 0 /var/log/pan/traffic/user/*.log. Use truncate, not rm: deleting a file that rsyslog has open doesn’t free the space.
+Where the other ~245 GB is:
 
-The permanent fix: replace /etc/logrotate.d/pan-rsyslog with:
+bash
+sudo du -xah / 2>/dev/null | sort -h | tail -20
+sudo lsof -nP +L1 2>/dev/null | awk 'NR==1 || $7 > 1e9'
 
+The second command lists deleted files a program still holds open. That space doesn’t come back until the program closes them.
+
+Why rotation never happened:
+
+bash
+ls -l /etc/logrotate.d/
+sudo grep pan /var/lib/logrotate/status | head -5
+systemctl list-timers logrotate.timer --no-pager
+systemctl status logrotate.service --no-pager -n 10
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -iE "error|ignoring"
+
+Usual causes:
+
+Ignoring pan-rsyslog because the file owner is wrong or …writable by group or others: logrotate skips the whole file. Step 4 fixes this.
+duplicate log entry: another file in that folder, often a renamed copy, covers the same logs. Move it to /root before step 4.
+No pan lines in the status file: logrotate has never looked at these logs.
+The service failed, or the timer shows no NEXT time. Step 5 fixes the timer.
+
+You can go on with steps 4–6 while I look at the screenshots.
+
+4. Install the new rule
+bash
+sudo cp /etc/logrotate.d/pan-rsyslog /root/pan-rsyslog.$(date +%F).bak
+sudo tee /etc/logrotate.d/pan-rsyslog > /dev/null <<'EOF'
 /var/log/pan/*/*/*.log {
     daily
-    rotate 3
+    maxsize 5G
+    rotate 30
     maxage 3
-    maxsize 2G
-    compress
-    missingok
-    notifempty
-    sharedscripts
-    postrotate
-        /usr/lib/rsyslog/rsyslog-rotate
-    endscript
-}
-“Every 3 days”: logrotate only rotates daily, weekly or monthly. daily plus rotate 3 keeps the live file and the last 3 days compressed. That also covers Microsoft’s advice to keep text-log files at least two days so AMA can finish reading them.
-maxsize 2G rotates a file early once it passes 2 GB, but only when logrotate runs, so make it run hourly with sudo systemctl edit logrotate.timer and add:
-  [Timer]
-  OnCalendar=
-  OnCalendar=hourly
-
-Your daily rules still rotate once a day; the hourly run only adds the size check.
-
-Dry run first: sudo logrotate -d /etc/logrotate.d/pan-rsyslog shows what it would do without changing anything.
-Check the sizing after a day with sudo du -sh /var/log/pan/*/user. Three compressed days plus one live day should take at most about half the disk. If they don’t fit, grow the disk or lower rotate.
-
-After that, retire the cleanup script.
-
-Third: monitoring
-
-AMA covers most of this. Turn each query below into an Azure Monitor log search alert with an action group (email or Teams). If the SOC should get incidents instead, use a Sentinel scheduled rule.
-
-1. Disk, CPU and memory. Create a DCR for the collectors: Monitor → Data Collection Rules → Create → Linux → data source Performance Counters → Basic. The data lands in the Perf table.
-
-kql
-Perf
-| where TimeGenerated > ago(15m)
-| where ObjectName == "Logical Disk" and CounterName == "% Used Space" and InstanceName == "/"
-| summarize UsedPct = max(CounterValue) by Computer
-| where UsedPct > 80
-
-Once data arrives, check the exact names with Perf | distinct ObjectName, CounterName, InstanceName.
-
-2. A collector or its agent is down. AMA sends a heartbeat every minute.
-
-kql
-Heartbeat
-| where TimeGenerated > ago(1d)
-| summarize Last = max(TimeGenerated) by Computer
-| where Computer startswith "ip-10-29-1-" and Last < ago(10m)
-
-3. A table or a firewall went silent
-
-kql
-union isfuzzy=true PaloAltoThreat_CL, PaloAltoTraffic_CL, PaloAltoUrlFiltering_CL
-| where TimeGenerated > ago(7d)
-| summarize Last = max(TimeGenerated) by Table = Type, Sender = Computer
-| where Last < ago(1h)
-
-For the Syslog table, run the same idea grouped by Facility, HostName. Quiet facilities like auth need a longer window, or they’ll alert constantly.
-
-
-
-
-
-It keeps 7 days.
-delaycompress leaves yesterday’s file uncompressed. With traffic logs, that’s a big file.
-Nothing limits file size during the day.
-
-Here’s your file with four changes. I tested it with logrotate in my sandbox.
-
-/var/log/pan/*/*/*.log {
-    daily
-    maxsize 1G
-    rotate 3
     compress
     missingok
     notifempty
@@ -103,64 +60,42 @@ Here’s your file with four changes. I tested it with logrotate in my sandbox.
         systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
     endscript
 }
-rotate 7 → rotate 3: keeps 3 old files instead of 7.
-delaycompress removed: rotated files get compressed right away.
-maxsize 1G added: rotates a file early once it passes 1 GB.
-dateformat now includes the time. With the date-only format, a second size-based rotation on the same day fails (“destination already exists, skipping rotation”), and the file keeps growing. My test reproduced that.
-
-On busy days, size-based rotations mean the 3 kept files can cover less than 3 days. That’s the trade-off that keeps the disk safe, and the data itself is already in Sentinel.
-
-Backup: copy it, don’t rename it in place. Keep the copy outside /etc/logrotate.d. logrotate reads every file in that folder. The version I tested skips .bak names, but older versions may not, and then the copy clashes with the real file.
-
-Step by step on the collector
-
-See what’s there:
+EOF
+sudo chown root:root /etc/logrotate.d/pan-rsyslog
+sudo chmod 644 /etc/logrotate.d/pan-rsyslog
+sudo find /var/log/pan -type f \( -name '*.log-????????' -o -name '*.log-????????.gz' \) -print -delete
+Backup: copy it to /root; don’t rename it in place. logrotate reads almost every file in that folder, so a renamed copy becomes a second rule for the same logs.
+What the rule does:
+It rotates daily, or as soon as a file passes 5 GB (checked hourly, step 5).
+It keeps compressed copies for 3 days. rotate 30 is only an upper limit.
+The time in the file name lets a file rotate more than once a day.
+The find line: it deletes old files rotated under the date-only names, if there are any. They’re already in Sentinel, and the new rule won’t recognise that name format.
+5. Run logrotate hourly
 bash
-   df -h /
-   sudo du -sh /var/log/pan/*/user
-   ls -lh /var/log/pan/traffic/user/
-Free space now. The new rule won’t clean up files rotated under the old date-only naming; my test confirmed it leaves them. So remove the old ones by age, then compress the uncompressed one:
+sudo mkdir -p /etc/systemd/system/logrotate.timer.d
+sudo tee /etc/systemd/system/logrotate.timer.d/hourly.conf > /dev/null <<'EOF'
+[Timer]
+OnCalendar=
+OnCalendar=hourly
+AccuracySec=1m
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable logrotate.timer
+sudo systemctl restart logrotate.timer
+systemctl list-timers logrotate.timer --no-pager     # NEXT = top of the next hour
+
+This doesn’t affect the other logrotate rules. They still rotate only when their own daily or weekly condition is met.
+
+6. Test and rotate once now
 bash
-   sudo find /var/log/pan -type f -name "*.log-*" -mtime +2 -print -delete
-   sudo find /var/log/pan -type f -name "*.log-*" ! -name "*.gz" -print -exec gzip {} \;
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -iE "error|ignoring"     # expect no output
+sudo logrotate -f -v /etc/logrotate.d/pan-rsyslog 2>&1 | grep -iE "error|renaming"
+sudo sh -c 'ls -lh /var/log/pan/*/user/'
 
-If gzip fails for lack of space, delete that uncompressed file instead. Its contents are already in Sentinel.
+You should see one renaming … line per file, then a .log-20261019-HHMMSS.gz next to each .log. Large threat files can take a few minutes to compress. Send me any error line.
 
-Back up the current rule:
-bash
-   sudo cp /etc/logrotate.d/pan-rsyslog /root/pan-rsyslog.$(date +%F).bak
-Replace the content with the config above:
-bash
-   sudo nano /etc/logrotate.d/pan-rsyslog
-Dry run. This changes nothing and shows only errors and the Palo Alto lines:
-bash
-   sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -i -E "error|pan/"
-Rotate once now to shrink today’s big files:
-bash
-   sudo logrotate -f -v /etc/logrotate.d/pan-rsyslog
-Make logrotate run hourly, so maxsize gets checked during the day:
-bash
-   sudo systemctl edit logrotate.timer
+7. Check again in an hour
+df -h / should stay flat, and systemctl list-timers logrotate.timer should show a LAST run.
+In Sentinel, run PaloAltoTraffic_CL | where TimeGenerated > ago(15m) | summarize count() by Computer. If it returns nothing while the files keep growing, the problem is the traffic DCR (your earlier “data stopped” issue), not the disk.
 
-Add these lines in the editor and save:
-
-   [Timer]
-   OnCalendar=
-   OnCalendar=hourly
-   AccuracySec=1m
-
-Then confirm the next run is within the hour:
-
-bash
-   systemctl list-timers logrotate.timer
-Verify:
-bash
-   ls -lh /var/log/pan/traffic/user/
-   df -h /
-   grep pan /var/lib/logrotate/status
-
-In Sentinel, data should keep flowing: PaloAltoTraffic_CL | where TimeGenerated > ago(15m) | count.
-
-Do the same on the second collector.
-
-After a day, check sudo du -sh /var/log/pan/*/user again. If the Palo Alto logs take more than about half the disk, lower maxsize or grow the volume.
+Later: use the same two files (the rule and the timer setting) on the new collector. To stop this happening again, move /var/log/pan to its own EBS volume, so a flood of logs can’t fill the system disk and stop AMA. Also add the disk-space alert from the monitoring setup.
