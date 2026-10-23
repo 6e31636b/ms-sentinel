@@ -1,0 +1,70 @@
+1. Check 
+
+bash
+df -h /
+systemctl show logrotate.service -p TimeoutStartUSec
+systemctl is-active logrotate.service
+grep -nE "maxage|rotate|compress" /etc/logrotate.d/pan-rsyslog
+sudo journalctl --since "2026-10-22 14:05" --until "2026-10-22 14:25" --no-pager | grep -iE "no space|suspend" | head
+
+2. Remove the 5-minute limit (skip this if step 1 already shows infinity)
+
+bash
+sudo mkdir -p /etc/systemd/system/logrotate.service.d
+printf '[Service]\nTimeoutStartSec=infinity\nNice=19\n' | sudo tee /etc/systemd/system/logrotate.service.d/no-timeout.conf
+sudo systemctl daemon-reload
+systemctl show logrotate.service -p TimeoutStartUSec     # must say infinity
+
+3. Replace the rule
+
+bash
+sudo cp /etc/logrotate.d/pan-rsyslog /root/pan-rsyslog.$(date +%F-%H%M).bak
+sudo tee /etc/logrotate.d/pan-rsyslog > /dev/null <<'EOF'
+/var/log/pan/*/*/*.log {
+    daily
+    maxsize 5G
+    rotate 30
+    maxage 3
+    compress
+    compressoptions -1
+    missingok
+    notifempty
+    dateext
+    dateformat -%Y%m%d-%H%M%S
+    create 0640 syslog adm
+    sharedscripts
+    postrotate
+        systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+    endscript
+    lastaction
+        find /var/log/pan -type f \( -name '*.log-*' ! -name '*.gz' -o -name '*.backup' \) -mmin +120 -delete
+        find /var/log/pan -type f -name '*.log-*.gz' -mmin +4320 -delete
+    endscript
+}
+EOF
+sudo chown root:root /etc/logrotate.d/pan-rsyslog && sudo chmod 644 /etc/logrotate.d/pan-rsyslog
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -iE "error|ignoring"    # expect no output
+
+What’s new:
+
+compressoptions -1 uses gzip’s fastest level. Compression runs slowly on this busy 2-CPU box.
+lastaction runs two cleanups after every rotation. The first deletes leftovers from interrupted compressions once they’re 2 hours old. The second deletes anything rotated more than 3 days ago, including logs from quiet firewalls.
+
+4. One-time cleanup (only if step 1’s is-active doesn’t say activating)
+
+bash
+sudo sh -c 'for f in /var/log/pan/*/user/*.log-*; do case "$f" in *.gz|*.backup) continue;; esac; rm -fv -- "$f" "$f.gz"; done'
+sudo find /var/log/pan -type f \( -name '*.backup' -o -name '*.log-*.gz' -mmin +4320 \) -print -delete
+df -h /
+
+The first line deletes each uncompressed rotated file and its half-written .gz. The second deletes .backup leftovers and anything older than 3 days. AMA only reads the live .log, so whatever AMA already read is in Sentinel; these are just local copies.
+
+5. Tomorrow morning, verify
+
+bash
+journalctl -u logrotate.service --since yesterday --no-pager | grep -iE "timed out|Failed|Finished"
+sudo find /var/log/pan -name '*.log-*' ! -name '*.gz'      # should print nothing
+
+You should only see “Finished” lines. Any “timed out” means something is still stopping the runs.
+
+If step 1 shows “No space left”, this is exactly what the runbook’s “Disk filling” alert would have caught at 80%. I can also add a leftover check and the new rule to the runbook page.
