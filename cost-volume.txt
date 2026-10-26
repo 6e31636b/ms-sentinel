@@ -1,0 +1,33 @@
+// Average daily volume and cost per table, last 14 full days
+let Tables = dynamic(["DeviceEvents","DeviceProcessEvents","DeviceNetworkEvents",
+                      "DeviceLogonEvents","DeviceRegistryEvents","DeviceFileEvents"]);  // your tables
+let Days = 14;
+let CHFperGB = 4.9843;           // analytics tier, pay-as-you-go, Switzerland North list price
+let CHFperGBMonthLake = 0.0220;  // data lake storage, per compressed GB-month (6:1)
+let TotalRetentionDays = 730;    // total retention; 90 = nothing kept in the lake
+let PerTable = Usage
+    | where TimeGenerated > ago(Days * 1d + 1d)
+    | where StartTime >= startofday(ago(Days * 1d)) and EndTime < startofday(now())
+    | where DataType in~ (Tables)          // remove this line to see every table
+    | summarize GB = sum(Quantity) / 1000.0,
+                BillableGB = sumif(Quantity, IsBillable == true) / 1000.0
+              by DataType, Day = startofday(StartTime)
+    | summarize DaysWithData = count(),
+                AvgGBperDay = round(avg(GB), 2),
+                MinGBperDay = round(min(GB), 2),
+                MaxGBperDay = round(max(GB), 2),
+                BillableGBperDay = avg(BillableGB)
+              by DataType
+    | extend CHFperDay = round(BillableGBperDay * CHFperGB, 2),
+             CHFperMonth = round(BillableGBperDay * CHFperGB * 365.0 / 12, 0),
+             LakeCHFperMonthWhenFull = round(AvgGBperDay * max_of(TotalRetentionDays - 90, 0) / 6.0 * CHFperGBMonthLake, 0);
+PerTable
+| union (PerTable
+    | summarize AvgGBperDay = sum(AvgGBperDay), BillableGBperDay = sum(BillableGBperDay),
+                CHFperDay = sum(CHFperDay), CHFperMonth = sum(CHFperMonth),
+                LakeCHFperMonthWhenFull = sum(LakeCHFperMonthWhenFull)
+    | extend DataType = "TOTAL")
+| extend IsTotal = DataType == "TOTAL"
+| sort by IsTotal asc, AvgGBperDay desc
+| project DataType, DaysWithData, AvgGBperDay, MinGBperDay, MaxGBperDay,
+          BillableGBperDay = round(BillableGBperDay, 2), CHFperDay, CHFperMonth, LakeCHFperMonthWhenFull
