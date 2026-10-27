@@ -31,3 +31,37 @@ PerTable
 | sort by IsTotal asc, AvgGBperDay desc
 | project DataType, DaysWithData, AvgGBperDay, MinGBperDay, MaxGBperDay,
           BillableGBperDay = round(BillableGBperDay, 2), CHFperDay, CHFperMonth, LakeCHFperMonthWhenFull
+
+
+
+
+
+// Data lake (lake-only) tables: average volume and cost, last 14 full days
+let LakeTables = dynamic(["PaloAltoTraffic_CL","PaloAltoUrlFiltering_CL"]);  // Tables page, Tier = Data lake
+let Days = 14;
+let CHFperGBIngest = 0.1785;      // lake ingestion 0.0595 + processing 0.1190, per GB
+let CHFperGBMonthStore = 0.0220;  // lake storage, per compressed GB-month (6:1)
+let RetentionDays = 365;          // total retention of these tables
+let PerTable = Usage
+    | where TimeGenerated > ago(Days * 1d + 1d)
+    | where StartTime >= startofday(ago(Days * 1d)) and EndTime < startofday(now())
+    | where DataType in~ (LakeTables) and IsBillable == true
+    | summarize GB = sum(Quantity) / 1000.0 by DataType, Day = startofday(StartTime)
+    | summarize DaysWithData = count(), AvgGBperDay = avg(GB),
+                MinGBperDay = min(GB), MaxGBperDay = max(GB) by DataType
+    | extend IngestCHFperMonth = AvgGBperDay * CHFperGBIngest * 365.0 / 12,
+             StorageCHFperMonthWhenFull = AvgGBperDay * RetentionDays / 6.0 * CHFperGBMonthStore;
+PerTable
+| union (PerTable
+    | summarize AvgGBperDay = sum(AvgGBperDay), IngestCHFperMonth = sum(IngestCHFperMonth),
+                StorageCHFperMonthWhenFull = sum(StorageCHFperMonthWhenFull)
+    | extend DataType = "TOTAL")
+| extend TotalCHFperMonthWhenFull = IngestCHFperMonth + StorageCHFperMonthWhenFull,
+         IsTotal = DataType == "TOTAL"
+| sort by IsTotal asc, AvgGBperDay desc
+| project DataType, DaysWithData, AvgGBperDay = round(AvgGBperDay, 2),
+          MinGBperDay = round(MinGBperDay, 2), MaxGBperDay = round(MaxGBperDay, 2),
+          IngestCHFperDay = round(IngestCHFperMonth * 12 / 365.0, 2),
+          IngestCHFperMonth = round(IngestCHFperMonth, 0),
+          StorageCHFperMonthWhenFull = round(StorageCHFperMonthWhenFull, 0),
+          TotalCHFperMonthWhenFull = round(TotalCHFperMonthWhenFull, 0)
