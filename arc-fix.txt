@@ -1,0 +1,3 @@
+Start-Process msiexec.exe -Wait -PassThru -ArgumentList '/fa "C:\Temp\AzureConnectedMachineAgent.msi" /qn /norestart /L*v "C:\Temp\himds-wfp-repair.log"'
+
+https://learn.microsoft.com/en-us/azure/azure-arc/servers/agent-release-notes#version-168---september-2026
