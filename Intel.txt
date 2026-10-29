@@ -1,0 +1,6 @@
+ThreatIntelIndicators
+| where TimeGenerated > ago(90d)
+| make-series Rows = count() default=0
+    on TimeGenerated from startofday(ago(90d)) to now() step 1d
+| mv-expand TimeGenerated to typeof(datetime), Rows to typeof(long)
+| where Rows == 0
