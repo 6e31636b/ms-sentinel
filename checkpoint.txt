@@ -1,0 +1,55 @@
+1. Check the vendor name Check Point sends
+
+kql
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+| summarize count() by DeviceVendor, DeviceProduct
+
+It’s normally Check Point. If yours is spelled differently, use that in step 3.
+
+2. Create CheckPoint_CL with CommonSecurityLog’s columns (Cloud Shell)
+
+bash
+RG=alp-rg-sentinel-prod-01
+WS=alp-law-sentinel-prod-01
+COLS=$(az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n CommonSecurityLog -o json \
+  | jq -r '.schema.standardColumns[]
+           | select(.name | IN("TenantId","SourceSystem","MG","ManagementGroupName","Type","_ResourceId") | not)
+           | "\(.name)=\(.type)"')
+echo "$COLS" | wc -l      # column count, roughly 150
+az monitor log-analytics workspace table create -g "$RG" --workspace-name "$WS" \
+  -n CheckPoint_CL --plan Analytics --columns $COLS
+
+The select line leaves out the system columns, which a custom table can’t define.
+
+3. Change the CEF DCR to two data flows. Open alp-dcr-sentinel-prod-01-linux-collector-cef in the portal, go to Automation → Export template, replace dataFlows with the block below, then deploy it as a custom template. Keep your existing destination name.
+
+json
+"dataFlows": [
+  {
+    "streams": ["Microsoft-CommonSecurityLog"],
+    "destinations": ["<existing destination name>"],
+    "transformKql": "source | where DeviceVendor !~ 'Check Point'",
+    "outputStream": "Microsoft-CommonSecurityLog"
+  },
+  {
+    "streams": ["Microsoft-CommonSecurityLog"],
+    "destinations": ["<existing destination name>"],
+    "transformKql": "source | where DeviceVendor =~ 'Check Point'",
+    "outputStream": "Custom-CheckPoint_CL"
+  }
+]
+
+4. Check, about 15 minutes after deploying
+
+kql
+union withsource=Table CommonSecurityLog, CheckPoint_CL
+| where TimeGenerated > ago(15m) and DeviceVendor =~ "Check Point"
+| summarize Rows = count() by Table
+
+Only CheckPoint_CL should appear. If it stays empty, look in DCRLogErrors (if you enabled the DCR’s Log Errors setting) or at the DCR’s dropped-rows metric.
+
+Before you switch, two things to know:
+
+Built-in Sentinel content stops seeing Check Point. The Check Point analytics rules, workbooks and parsers query CommonSecurityLog, so point them at CheckPoint_CL. For queries that need history from before the switch, use union CommonSecurityLog, CheckPoint_CL.
+If the goal is only cheaper storage, a split rule on CommonSecurityLog for DeviceVendor =~ "Check Point" sends those rows to the data lake (CommonSecurityLog_SPLT_CL). That needs no DCR change at all.
