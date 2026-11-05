@@ -9,17 +9,18 @@ It’s normally Check Point. If yours is spelled differently, use that in step 3
 
 2. Create CheckPoint_CL with CommonSecurityLog’s columns (Cloud Shell)
 
-bash
-RG=alp-rg-sentinel-prod-01
-WS=alp-law-sentinel-prod-01
-COLS=$(az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n CommonSecurityLog -o json \
-  | jq -r '.schema.standardColumns[]
-           | select(.name | test("^_") or IN("TenantId","Type") | not)
-           | "\(.name)=\(.type)"')
-echo "$COLS" | wc -l    # preview: how many columns
-echo "$COLS" | head     # preview: lines like DeviceVendor=string
-az monitor log-analytics workspace table create -g "$RG" --workspace-name "$WS" \
-  -n CheckPoint_CL --plan Analytics --columns $COLS
+# 1. Build the column list and preview it
+$RG = "alp-rg-sentinel-prod-01"
+$WS = "alp-law-sentinel-prod-01"
+$t = az monitor log-analytics workspace table show -g $RG --workspace-name $WS -n CommonSecurityLog -o json | ConvertFrom-Json
+$cols = $t.schema.standardColumns |
+  Where-Object { $_.name -notlike "_*" -and $_.name -notin @("TenantId","Type") } |
+  ForEach-Object { "$($_.name)=$($_.type)" }
+$cols.Count                       # about 150
+$cols | Select-Object -First 10   # lines like DeviceVendor=string
+
+# 2. Create the table once the preview looks right
+az monitor log-analytics workspace table create -g $RG --workspace-name $WS -n CheckPoint_CL --plan Analytics --columns $cols
 
 The select line leaves out the system columns, which a custom table can’t define.
 
