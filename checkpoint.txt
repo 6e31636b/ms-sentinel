@@ -55,3 +55,11 @@ Before you switch, two things to know:
 
 Built-in Sentinel content stops seeing Check Point. The Check Point analytics rules, workbooks and parsers query CommonSecurityLog, so point them at CheckPoint_CL. For queries that need history from before the switch, use union CommonSecurityLog, CheckPoint_CL.
 If the goal is only cheaper storage, a split rule on CommonSecurityLog for DeviceVendor =~ "Check Point" sends those rows to the data lake (CommonSecurityLog_SPLT_CL). That needs no DCR change at all.
+
+
+RG=alp-rg-sentinel-prod-01; WS=alp-law-sentinel-prod-01
+az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n CheckPoint_CL \
+  --query "{table:name, plan:plan, columns:length(schema.columns)}" -o table
+DCR_ID=$(az resource list -n alp-dcr-sentinel-prod-01-linux-collector-cef --resource-type Microsoft.Insights/dataCollectionRules --query "[0].id" -o tsv); echo "$DCR_ID"
+az rest --method get --url "$DCR_ID?api-version=2023-03-11" > cef-dcr-now.json
+jq -r '.properties.dataFlows[] | "\(.streams | join(",")) -> \(.outputStream // "(default)")  |  \(.transformKql // "(no transform)")"' cef-dcr-now.json
