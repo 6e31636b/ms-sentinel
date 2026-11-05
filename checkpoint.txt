@@ -14,9 +14,10 @@ RG=alp-rg-sentinel-prod-01
 WS=alp-law-sentinel-prod-01
 COLS=$(az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n CommonSecurityLog -o json \
   | jq -r '.schema.standardColumns[]
-           | select(.name | IN("TenantId","SourceSystem","MG","ManagementGroupName","Type","_ResourceId") | not)
+           | select(.name | test("^_") or IN("TenantId","Type") | not)
            | "\(.name)=\(.type)"')
-echo "$COLS" | wc -l      # column count, roughly 150
+echo "$COLS" | wc -l    # preview: how many columns
+echo "$COLS" | head     # preview: lines like DeviceVendor=string
 az monitor log-analytics workspace table create -g "$RG" --workspace-name "$WS" \
   -n CheckPoint_CL --plan Analytics --columns $COLS
 
