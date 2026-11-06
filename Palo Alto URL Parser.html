@@ -1,0 +1,636 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Palo Alto URL Parser</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: an operator's change procedure, same family as the collector runbook and the recovery plan.
+   A step rail with progress beside one reading column; commands scroll inside their own frames. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #16202b;
+  --muted: #586574;
+  --rule: #d8dee6;
+  --rule-strong: #98a4b1;
+  --accent: #2446c0;
+  --accent-tint: rgba(36, 70, 192, 0.08);
+  --lake: #0b6873;
+  --lake-tint: rgba(11, 104, 115, 0.10);
+  --code-bg: #edf0f4;
+  --code-ink: #1b2631;
+  --code-comment: #6a7684;
+  --good: #1c7449;
+  --good-bg: rgba(28, 116, 73, 0.10);
+  --warn: #8f5500;
+  --warn-bg: rgba(143, 85, 0, 0.12);
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1217;
+    --surface: #141b22;
+    --ink: #e2e7ed;
+    --muted: #96a2af;
+    --rule: #25303b;
+    --rule-strong: #4f5c69;
+    --accent: #93abff;
+    --accent-tint: rgba(147, 171, 255, 0.12);
+    --lake: #6fcbd4;
+    --lake-tint: rgba(111, 203, 212, 0.13);
+    --code-bg: #10171e;
+    --code-ink: #d6dde5;
+    --code-comment: #7e8b98;
+    --good: #62c993;
+    --good-bg: rgba(98, 201, 147, 0.14);
+    --warn: #efb25a;
+    --warn-bg: rgba(239, 178, 90, 0.14);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1217;
+  --surface: #141b22;
+  --ink: #e2e7ed;
+  --muted: #96a2af;
+  --rule: #25303b;
+  --rule-strong: #4f5c69;
+  --accent: #93abff;
+  --accent-tint: rgba(147, 171, 255, 0.12);
+  --lake: #6fcbd4;
+  --lake-tint: rgba(111, 203, 212, 0.13);
+  --code-bg: #10171e;
+  --code-ink: #d6dde5;
+  --code-comment: #7e8b98;
+  --good: #62c993;
+  --good-bg: rgba(98, 201, 147, 0.14);
+  --warn: #efb25a;
+  --warn-bg: rgba(239, 178, 90, 0.14);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--font-body);
+  -webkit-text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "rail" "main";
+  gap: 28px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-block: 32px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 1080px) {
+  .shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-areas: "rail head" "rail main";
+    column-gap: 56px;
+  }
+}
+
+/* Header */
+.page-head { grid-area: head; min-width: 0; max-width: 820px; }
+.eyebrow {
+  font: 500 0.74rem/1.2 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+h1 {
+  font: 600 clamp(1.9rem, 1.3rem + 2.2vw, 2.6rem)/1.12 var(--font-display);
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+.lead { font-size: 1.08rem; max-width: 65ch; margin: 0; }
+.stamp { font: 400 0.82rem/1.4 var(--font-mono); color: var(--muted); margin: 14px 0 0; }
+.progress { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+.progress-bar { width: min(320px, 100%); height: 6px; border-radius: 999px; background: var(--rule); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 0; background: var(--good); }
+@media (prefers-reduced-motion: no-preference) { .progress-bar span { transition: width 0.2s ease; } }
+.progress-text { font: 500 0.82rem/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Step rail */
+.toc { grid-area: rail; min-width: 0; }
+.toc-inner { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); padding: 14px 16px; }
+.toc-label { font: 500 0.72rem/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc a {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center;
+  padding: 5px 8px; margin-left: -8px; border-radius: 4px;
+  color: var(--ink); text-decoration: none; font-size: 0.9rem; line-height: 1.35;
+}
+.toc a:hover { background: var(--accent-tint); }
+.toc a[aria-current="true"] { background: var(--accent-tint); color: var(--accent); font-weight: 500; }
+.toc a.is-done .n { color: var(--good); border-color: var(--good); background: var(--good-bg); }
+.toc a.is-done .toc-text { color: var(--muted); }
+.toc .after { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); }
+.toc .after + .after { margin-top: 0; padding-top: 0; border-top: 0; }
+@media (max-width: 1079px) {
+  .toc ol { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 16px; }
+  .toc .after { grid-column: 1 / -1; }
+}
+@media (min-width: 1080px) {
+  .toc-inner { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); border: 0; background: none; padding: 4px 0 0; }
+}
+
+/* Main column */
+main { grid-area: main; min-width: 0; max-width: 820px; display: grid; gap: 48px; }
+section { min-width: 0; display: grid; gap: 14px; scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 16px); }
+section > p, .sub > p { margin: 0; max-width: 68ch; }
+.step { border-top: 2px solid var(--ink); padding-top: 18px; }
+.step-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h2 { font: 600 1.55rem/1.2 var(--font-display); margin: 0; text-wrap: balance; flex: 1 1 260px; min-width: 0; }
+h3 { font: 600 1rem/1.35 var(--font-body); margin: 6px 0 0; }
+.sub { display: grid; gap: 10px; min-width: 0; }
+
+.n {
+  display: inline-grid; place-items: center;
+  min-width: 1.7em; height: 1.7em;
+  font: 500 0.8rem/1 var(--font-mono);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.step-head .n { min-width: 2em; height: 2em; font-size: 0.95rem; }
+.step.is-done .step-head .n { color: var(--good); border-color: var(--good); background: var(--good-bg); }
+
+.done-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 500 0.84rem/1 var(--font-body);
+  padding: 7px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.done-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--good); }
+.step.is-done .done-toggle { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  padding: 0.08em 0.34em;
+  border-radius: 3px;
+}
+td code, li code, p code { overflow-wrap: break-word; }
+
+/* Code blocks */
+.code { border: 1px solid var(--rule); border-radius: 6px; background: var(--code-bg); min-width: 0; overflow: hidden; }
+.code-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--rule); }
+.lang { font: 500 0.7rem/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.copy {
+  font: 500 0.78rem/1 var(--font-body);
+  padding: 7px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 72px;
+}
+.copy:hover { border-color: var(--accent); color: var(--accent); }
+.copy[data-state="done"] { border-color: var(--good); color: var(--good); }
+.code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font: 0.84rem/1.62 var(--font-mono); color: var(--code-ink); }
+.code pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
+.code .c { color: var(--code-comment); }
+
+/* Overview table: the two tables before and after */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; line-height: 1.5; min-width: 640px; }
+th { text-align: left; font: 600 0.72rem/1.3 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+td { padding: 12px 14px; border-top: 1px solid var(--rule); vertical-align: top; }
+tbody tr:first-child td { border-top: 0; }
+td.tname { font: 500 0.88rem/1.4 var(--font-mono); white-space: nowrap; }
+td.tname small { display: block; font: 400 0.78rem/1.3 var(--font-body); color: var(--muted); margin-top: 2px; }
+.tier {
+  display: inline-block;
+  font: 500 0.74rem/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.tier-analytics { color: var(--accent); background: var(--accent-tint); }
+.tier-lake { color: var(--lake); background: var(--lake-tint); }
+.none { color: var(--muted); }
+.gone { text-decoration: line-through; color: var(--muted); }
+/* Phones: each table row becomes a stacked block with its own labels */
+@media (max-width: 640px) {
+  .changes table, .changes tbody, .changes tr, .changes td { display: block; }
+  .changes table { min-width: 0; }
+  .changes thead { display: none; }
+  .changes tr { padding: 14px; border-top: 1px solid var(--rule); display: grid; gap: 10px; }
+  .changes tbody tr:first-child { border-top: 0; }
+  .changes td { border: 0; padding: 0; }
+  .changes td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font: 600 0.7rem/1.3 var(--font-body);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+}
+
+/* Lists and notes */
+.points { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 70ch; }
+.note { border-left: 3px solid var(--rule-strong); padding: 2px 0 2px 14px; color: var(--muted); max-width: 68ch; margin: 0; }
+.warn { border-left: 3px solid var(--warn); background: var(--warn-bg); padding: 10px 14px; border-radius: 0 6px 6px 0; max-width: 68ch; margin: 0; }
+.overview { display: grid; gap: 14px; }
+.overview h2 { font-size: 1.3rem; }
+.after-block { border-top: 1px solid var(--rule); padding-top: 18px; }
+.after-block h2 { font-size: 1.3rem; }
+.sources ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.hint { font-size: 0.84rem; color: var(--muted); margin: 0; }
+</style>
+<style>
+.pos { font: 400 0.8rem/1.3 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.fields td.tname { font-size: 0.84rem; }
+.fields td { font-size: 0.88rem; }
+@media (max-width: 640px) {
+  .fields tr { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 6px; }
+  .fields td.tname { grid-column: 1; grid-row: 1; }
+  .fields td[data-label="Type"] { grid-column: 2; grid-row: 1; justify-self: end; }
+  .fields td[data-label="Type"]::before { display: none; }
+  .fields td[data-label="PAN-OS field (position)"], .fields td[data-label="Why"] { grid-column: 1 / -1; }
+}
+</style>
+
+<div class="shell">
+
+<header class="page-head">
+  <p class="eyebrow">Change plan · Sentinel syslog collectors</p>
+  <h1>Parse the Palo Alto URL filtering logs</h1>
+  <p class="lead">The URL filtering DCR sends each log as one raw line. This change makes it extract 24 fields as well: who browsed, what they asked for, what the firewall decided, and how to pivot to the traffic logs. Positions come from Palo Alto's URL Filtering Log Fields reference, and only fields that sit at the same position in PAN-OS 10.1, 10.2 and the current NGFW docs are used. Nothing changes on the collectors.</p>
+  <p class="stamp">As of 6 November 2026 · run the commands in Azure Cloud Shell (Bash)</p>
+  <div class="progress" aria-live="polite">
+    <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
+    <span class="progress-text"><span id="progress-count">0</span> of 5 steps done</span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Steps">
+  <div class="toc-inner">
+    <p class="toc-label">Steps</p>
+    <ol>
+      <li><a href="#step-1" data-step="1"><span class="n">1</span><span class="toc-text">Find the DCR and back it up</span></a></li>
+      <li><a href="#step-2" data-step="2"><span class="n">2</span><span class="toc-text">Add the columns to the table</span></a></li>
+      <li><a href="#step-3" data-step="3"><span class="n">3</span><span class="toc-text">Test on real rows</span></a></li>
+      <li><a href="#step-4" data-step="4"><span class="n">4</span><span class="toc-text">Deploy the transformation</span></a></li>
+      <li><a href="#step-5" data-step="5"><span class="n">5</span><span class="toc-text">Verify</span></a></li>
+      <li class="after"><a href="#rollback"><span class="n">↩</span><span class="toc-text">Roll back</span></a></li>
+      <li class="after"><a href="#examples"><span class="n">+</span><span class="toc-text">Using the fields</span></a></li>
+    </ol>
+    <p class="hint" style="margin-top:10px">Ticks are saved in this browser only.</p>
+  </div>
+</nav>
+
+<main>
+
+<section class="overview" id="fields" aria-labelledby="h-fields">
+  <h2 id="h-fields">The fields</h2>
+  <div class="table-wrap changes fields">
+    <table>
+      <thead><tr><th>Column</th><th>Type</th><th>PAN-OS field (position)</th><th>Why</th></tr></thead>
+      <tbody>
+<tr><td class="tname">GeneratedTime</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Generated Time <span class="pos">(6)</span></td><td data-label="Why">When the firewall logged the request (firewall local time, kept as text like in the traffic table)</td></tr>
+<tr><td class="tname">DeviceName</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Device Name <span class="pos">(59)</span></td><td data-label="Why">Which firewall logged it</td></tr>
+<tr><td class="tname">Subtype</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Threat/Content Type <span class="pos">(4)</span></td><td data-label="Why">Always <code>url</code> here; confirms the rsyslog routing</td></tr>
+<tr><td class="tname">SourceUser</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Source User <span class="pos">(12)</span></td><td data-label="Why">Who browsed (needs User-ID)</td></tr>
+<tr><td class="tname">SourceIP</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Source Address <span class="pos">(7)</span></td><td data-label="Why">Which client</td></tr>
+<tr><td class="tname">SourceZone</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Source Zone <span class="pos">(16)</span></td><td data-label="Why">Which network segment the client sits in</td></tr>
+<tr><td class="tname">NatSourceIP</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">NAT Source IP <span class="pos">(9)</span></td><td data-label="Why">The public address the site saw; matches external abuse reports</td></tr>
+<tr><td class="tname">XForwardedFor</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">X-Forwarded-For <span class="pos">(48)</span></td><td data-label="Why">The real client when requests come through a proxy</td></tr>
+<tr><td class="tname">Url</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">URL/Filename <span class="pos">(31)</span></td><td data-label="Why">The requested URL</td></tr>
+<tr><td class="tname">UrlHost</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">URL/Filename, host part <span class="pos">(31)</span></td><td data-label="Why">Host name only, for domain indicators and grouping</td></tr>
+<tr><td class="tname">Category</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Category <span class="pos">(33)</span></td><td data-label="Why">URL category the policy acted on</td></tr>
+<tr><td class="tname">Action</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Action <span class="pos">(30)</span></td><td data-label="Why">allow, alert, block-url, continue, override and so on</td></tr>
+<tr><td class="tname">Severity</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Severity <span class="pos">(34)</span></td><td data-label="Why">Severity the firewall assigned</td></tr>
+<tr><td class="tname">RuleName</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Rule Name <span class="pos">(11)</span></td><td data-label="Why">Security rule that matched</td></tr>
+<tr><td class="tname">Application</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Application <span class="pos">(14)</span></td><td data-label="Why">App-ID, for example web-browsing or ssl</td></tr>
+<tr><td class="tname">HttpMethod</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">HTTP Method <span class="pos">(63)</span></td><td data-label="Why">GET, POST and so on</td></tr>
+<tr><td class="tname">UserAgent</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">User Agent <span class="pos">(46)</span></td><td data-label="Why">Browser or tool that made the request</td></tr>
+<tr><td class="tname">Referer</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Referer <span class="pos">(49)</span></td><td data-label="Why">Page that led to the request</td></tr>
+<tr><td class="tname">ContentType</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Content Type <span class="pos">(41)</span></td><td data-label="Why">Type of the response, for example an executable download</td></tr>
+<tr><td class="tname">DestinationIP</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Destination Address <span class="pos">(8)</span></td><td data-label="Why">Server address</td></tr>
+<tr><td class="tname">DestinationPort</td><td data-label="Type"><code>int</code></td><td data-label="PAN-OS field (position)">Destination Port <span class="pos">(25)</span></td><td data-label="Why">Web traffic on unusual ports stands out</td></tr>
+<tr><td class="tname">DestinationZone</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Destination Zone <span class="pos">(17)</span></td><td data-label="Why">Usually the internet-facing zone</td></tr>
+<tr><td class="tname">DestinationCountry</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Destination Country <span class="pos">(39)</span></td><td data-label="Why">Where the server is</td></tr>
+<tr><td class="tname">SessionId</td><td data-label="Type"><code>string</code></td><td data-label="PAN-OS field (position)">Session ID <span class="pos">(22)</span></td><td data-label="Why">With DeviceName, joins to PaloAltoTraffic_CL for bytes and duration</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="points">
+    <li><code>TimeGenerated</code>, <code>RawData</code> and <code>FilePath</code> stay as they are. <code>Computer</code> becomes the firewall's name, taken from the log file name, the same as in <code>PaloAltoTraffic_CL</code>. Until now it held the collector's name, which stays visible in <code>_ResourceId</code>.</li>
+    <li><code>UserAgent</code>, <code>Referer</code> and <code>XForwardedFor</code> are only filled when HTTP Header Logging is turned on for them in the URL Filtering profile. For HTTPS they also need decryption. Without it the firewall only sees the host name, so <code>Url</code> holds just the host and the HTTP fields stay empty.</li>
+    <li>URL Category List and XFF Address sit at position 75 and 79 in PAN-OS 10.x but at 77 and 81 in the current docs, so they're left out. Tell me your PAN-OS version and I'll add them at the right positions.</li>
+  </ul>
+</section>
+
+<section class="step" id="step-1" aria-labelledby="h-step-1">
+  <div class="step-head">
+    <span class="n">1</span>
+    <h2 id="h-step-1">Find the DCR and back it up</h2>
+    <label class="done-toggle"><input type="checkbox" id="done-1" data-step="1"> Done</label>
+  </div>
+  <p>Open Cloud Shell in Bash mode (in PowerShell mode, type <code>bash</code> first). If Cloud Shell restarts later, run steps 1 and 2's blocks again before continuing.</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>RG=alp-rg-sentinel-prod-01
+WS=alp-law-sentinel-prod-01
+<span class="c"># DCRs with "url" in the name: one of them is the URL filtering DCR</span>
+az resource list --resource-type Microsoft.Insights/dataCollectionRules --query "[?contains(name, 'url')].name" -o tsv</code></pre></div>
+  <p>Set <code>DCR</code> to the URL filtering DCR's name, then back it up and print what it does today:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>DCR=alp-dcr-sentinel-prod-01-linux-collector-pan-url   # change to the name printed above
+DCR_ID=$(az resource list -n "$DCR" --resource-type Microsoft.Insights/dataCollectionRules --query "[0].id" -o tsv); echo "$DCR_ID"
+az rest --method get --url "$DCR_ID?api-version=2023-03-11" &gt; url-dcr-backup.json
+<span class="c"># The data flow and its current transformation</span>
+jq -r '.properties.dataFlows[] | "\(.streams[0]) -&gt; \(.outputStream)\n  \(.transformKql // "(no transformation)")"' url-dcr-backup.json
+<span class="c"># Columns the input stream delivers</span>
+jq -r '.properties.streamDeclarations | to_entries[] | "\(.key): \([.value.columns[].name] | join(", "))"' url-dcr-backup.json
+TABLE=$(jq -r '[.properties.dataFlows[].outputStream | select(startswith("Custom-"))][0] | sub("^Custom-"; "")' url-dcr-backup.json); echo "$TABLE"</code></pre></div>
+  <p>Expect one flow from a <code>Custom-Text-…</code> stream to <code>Custom-&lt;table&gt;</code>, no field extraction, and stream columns that include <code>TimeGenerated, RawData, FilePath, Computer</code>. The last line prints the table name. If any of that looks different, stop and send me the output.</p>
+</section>
+
+<section class="step" id="step-2" aria-labelledby="h-step-2">
+  <div class="step-head">
+    <span class="n">2</span>
+    <h2 id="h-step-2">Add the columns to the table</h2>
+    <label class="done-toggle"><input type="checkbox" id="done-2" data-step="2"> Done</label>
+  </div>
+  <p>The table needs the new columns before the DCR sends them; columns the table doesn't have are dropped. The CLI's <code>--columns</code> replaces the table's whole column list, so this block starts from the current columns and adds the new ones:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n "$TABLE" -o json &gt; url-table-before.json
+NEW="GeneratedTime=string DeviceName=string Subtype=string SourceUser=string SourceIP=string SourceZone=string NatSourceIP=string XForwardedFor=string Url=string UrlHost=string Category=string Action=string Severity=string RuleName=string Application=string HttpMethod=string UserAgent=string Referer=string ContentType=string DestinationIP=string DestinationPort=int DestinationZone=string DestinationCountry=string SessionId=string"
+COLS=$( { jq -r '.schema.columns[] | "\(.name)=\(.type)"' url-table-before.json; printf '%s\n' $NEW; } | awk -F= '!seen[$1]++' )
+<span class="c"># Preview: the table's current columns first, then the 24 new ones</span>
+echo "$COLS"</code></pre></div>
+  <p>Check the preview: every column the table has today must be at the top. Then apply it:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>az monitor log-analytics workspace table update -g "$RG" --workspace-name "$WS" -n "$TABLE" --columns $COLS -o none
+<span class="c"># Expect the old columns plus the new ones</span>
+az monitor log-analytics workspace table show -g "$RG" --workspace-name "$WS" -n "$TABLE" --query "schema.columns[].name" -o tsv | tr '\n' ' '; echo</code></pre></div>
+</section>
+
+<section class="step" id="step-3" aria-labelledby="h-step-3">
+  <div class="step-head">
+    <span class="n">3</span>
+    <h2 id="h-step-3">Test on real rows</h2>
+    <label class="done-toggle"><input type="checkbox" id="done-3" data-step="3"> Done</label>
+  </div>
+  <p>Run this in Logs. It feeds the last hour's raw lines through exactly the transformation step 4 deploys. The queries on this page use <code>PaloAltoUrl_CL</code>; if step 1 printed another table name, change it.</p>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Runs the new transformation on rows already in the table. Nothing is deployed.</span>
+let source = PaloAltoUrl_CL
+    | where TimeGenerated &gt; ago(1h)
+    | take 50
+    | project TimeGenerated, RawData, FilePath, Computer;
+source
+| extend f = extract_all(@'(?:^|,)("[^"]*"|[^,]*)', RawData)
+| project TimeGenerated, RawData, FilePath,
+    Computer = extract(@'([^/]+)\.log$', 1, FilePath),
+    GeneratedTime = tostring(f[6]),
+    DeviceName = tostring(f[59]),
+    Subtype = tostring(f[4]),
+    SourceUser = extract(@'^"?(.*?)"?$', 1, tostring(f[12])),
+    SourceIP = tostring(f[7]),
+    SourceZone = tostring(f[16]),
+    NatSourceIP = tostring(f[9]),
+    XForwardedFor = extract(@'^"?(.*?)"?$', 1, tostring(f[48])),
+    Url = extract(@'^"?(.*?)"?$', 1, tostring(f[31])),
+    UrlHost = extract(@'^"?(?:[A-Za-z][A-Za-z0-9+.-]*://)?([^/:?#"]+)', 1, tostring(f[31])),
+    Category = tostring(f[33]),
+    Action = tostring(f[30]),
+    Severity = tostring(f[34]),
+    RuleName = tostring(f[11]),
+    Application = tostring(f[14]),
+    HttpMethod = tostring(f[63]),
+    UserAgent = extract(@'^"?(.*?)"?$', 1, tostring(f[46])),
+    Referer = extract(@'^"?(.*?)"?$', 1, tostring(f[49])),
+    ContentType = extract(@'^"?(.*?)"?$', 1, tostring(f[41])),
+    DestinationIP = tostring(f[8]),
+    DestinationPort = toint(f[25]),
+    DestinationZone = tostring(f[17]),
+    DestinationCountry = extract(@'^"?(.*?)"?$', 1, tostring(f[39])),
+    SessionId = tostring(f[22])
+| project-away RawData, FilePath</code></pre></div>
+  <p>Check a few rows: <code>Url</code> and <code>UrlHost</code> filled, <code>Subtype</code> = <code>url</code>, <code>Action</code> and <code>Category</code> look right, and <code>DeviceName</code> is a firewall. Compare one row against its raw line if anything looks shifted.</p>
+</section>
+
+<section class="step" id="step-4" aria-labelledby="h-step-4">
+  <div class="step-head">
+    <span class="n">4</span>
+    <h2 id="h-step-4">Deploy the transformation</h2>
+    <label class="done-toggle"><input type="checkbox" id="done-4" data-step="4"> Done</label>
+  </div>
+  <p>Save the transformation to a file:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>cat &gt; url-transform.kql &lt;&lt;'EOF'
+source
+| extend f = extract_all(@'(?:^|,)("[^"]*"|[^,]*)', RawData)
+| project TimeGenerated, RawData, FilePath,
+    Computer = extract(@'([^/]+)\.log$', 1, FilePath),
+    GeneratedTime = tostring(f[6]),
+    DeviceName = tostring(f[59]),
+    Subtype = tostring(f[4]),
+    SourceUser = extract(@'^"?(.*?)"?$', 1, tostring(f[12])),
+    SourceIP = tostring(f[7]),
+    SourceZone = tostring(f[16]),
+    NatSourceIP = tostring(f[9]),
+    XForwardedFor = extract(@'^"?(.*?)"?$', 1, tostring(f[48])),
+    Url = extract(@'^"?(.*?)"?$', 1, tostring(f[31])),
+    UrlHost = extract(@'^"?(?:[A-Za-z][A-Za-z0-9+.-]*://)?([^/:?#"]+)', 1, tostring(f[31])),
+    Category = tostring(f[33]),
+    Action = tostring(f[30]),
+    Severity = tostring(f[34]),
+    RuleName = tostring(f[11]),
+    Application = tostring(f[14]),
+    HttpMethod = tostring(f[63]),
+    UserAgent = extract(@'^"?(.*?)"?$', 1, tostring(f[46])),
+    Referer = extract(@'^"?(.*?)"?$', 1, tostring(f[49])),
+    ContentType = extract(@'^"?(.*?)"?$', 1, tostring(f[41])),
+    DestinationIP = tostring(f[8]),
+    DestinationPort = toint(f[25]),
+    DestinationZone = tostring(f[17]),
+    DestinationCountry = extract(@'^"?(.*?)"?$', 1, tostring(f[39])),
+    SessionId = tostring(f[22])
+EOF</code></pre></div>
+  <p>Put it into the DCR copy and preview it. Nothing is deployed yet:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code>jq --arg out "Custom-$TABLE" --rawfile kql url-transform.kql '
+  ([.properties.dataFlows[] | select(.outputStream == $out)] | length) as $n
+  | if $n != 1 then error("expected 1 flow to \($out), found \($n)") else . end
+  | .properties.dataFlows |= map(if .outputStream == $out then .transformKql = $kql else . end)
+' url-dcr-backup.json &gt; url-dcr-new.json
+<span class="c"># Preview: the start of the new transformation</span>
+jq -r '.properties.dataFlows[] | "== \(.outputStream)\n\(.transformKql)"' url-dcr-new.json | head -8
+<span class="c"># Must end with: OK, only dataFlows changed</span>
+diff &lt;(jq -S 'del(.properties.dataFlows)' url-dcr-backup.json) &lt;(jq -S 'del(.properties.dataFlows)' url-dcr-new.json) &amp;&amp; echo "OK, only dataFlows changed"</code></pre></div>
+  <p>Deploy:</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c"># Expect: Succeeded</span>
+az rest --method put --url "$DCR_ID?api-version=2023-03-11" --body @url-dcr-new.json --query properties.provisioningState -o tsv</code></pre></div>
+  <p>If the command fails, nothing has changed; send me the error. The collectors need nothing. The change usually takes effect within minutes; allow up to an hour.</p>
+</section>
+
+<section class="step" id="step-5" aria-labelledby="h-step-5">
+  <div class="step-head">
+    <span class="n">5</span>
+    <h2 id="h-step-5">Verify</h2>
+    <label class="done-toggle"><input type="checkbox" id="done-5" data-step="5"> Done</label>
+  </div>
+  <p>In Logs, 15 to 30 minutes after deploying:</p>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Expect Parsed = Rows, Subtypes = ["url"], and your firewalls in Firewalls</span>
+PaloAltoUrl_CL
+| where TimeGenerated &gt; ago(15m)
+| summarize Rows = count(), Parsed = countif(isnotempty(Url)), Subtypes = make_set(Subtype), Firewalls = make_set(DeviceName)</code></pre></div>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code>PaloAltoUrl_CL
+| where TimeGenerated &gt; ago(15m)
+| project TimeGenerated, DeviceName, SourceUser, SourceIP, Action, Category, UrlHost, Url, HttpMethod, UserAgent
+| take 20</code></pre></div>
+  <p>In the Azure portal, open the DCR and select Metrics: <code>Logs Transform Errors per Min</code> and <code>Logs Rows Dropped per Min</code> should stay at 0. Rows from before the change keep only their raw line.</p>
+</section>
+
+<section class="after-block" id="rollback" aria-labelledby="h-rollback">
+  <h2 id="h-rollback">Roll back</h2>
+  <p>Put the backed-up DCR back. The new columns can stay in the table; they simply stay empty. If Cloud Shell has restarted, set <code>RG</code>, <code>WS</code>, <code>DCR</code> and <code>DCR_ID</code> from step 1 first.</p>
+  <div class="code"><div class="code-bar"><span class="lang">bash</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c"># Expect: Succeeded</span>
+az rest --method put --url "$DCR_ID?api-version=2023-03-11" --body @url-dcr-backup.json --query properties.provisioningState -o tsv</code></pre></div>
+</section>
+
+<section class="after-block" id="examples" aria-labelledby="h-examples">
+  <h2 id="h-examples">Using the fields</h2>
+  <p>Two examples of what the columns are for. Category names are Palo Alto's predefined URL categories.</p>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Monitoring: requests to high-risk categories, per user and hour</span>
+PaloAltoUrl_CL
+| where TimeGenerated &gt; ago(1d)
+| where Category in ("malware", "phishing", "command-and-control", "grayware", "ransomware")
+| summarize Requests = count(), Blocked = countif(Action startswith "block"), Hosts = make_set(UrlHost, 20)
+    by SourceUser, SourceIP, DeviceName, Category, bin(TimeGenerated, 1h)</code></pre></div>
+  <div class="code"><div class="code-bar"><span class="lang">kql</span><button type="button" class="copy">Copy</button></div><pre><code><span class="c">// Investigation: what one client browsed, with bytes from the traffic log</span>
+let client = "10.29.5.20";
+PaloAltoUrl_CL
+| where TimeGenerated &gt; ago(1d) and SourceIP == client
+| join kind=leftouter (
+    PaloAltoTraffic_CL
+    | where TimeGenerated &gt; ago(1d) and SourceIP == client
+    | project SessionId, DeviceName, BytesSent, BytesReceived, ElapsedTime
+  ) on SessionId, DeviceName
+| project TimeGenerated, Action, Category, UrlHost, Url, HttpMethod, Referer, BytesSent, BytesReceived
+| order by TimeGenerated asc</code></pre></div>
+  <p class="note">Session IDs are per firewall and get reused over time, so join on <code>SessionId</code> and <code>DeviceName</code> within a limited time window.</p>
+</section>
+
+<section class="sources" id="sources" aria-labelledby="h-sources">
+  <h2 id="h-sources" style="font-size:1.3rem">Sources</h2>
+  <ul>
+    <li><a href="https://docs.paloaltonetworks.com/ngfw/administration/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/url-filtering-log-fields" target="_blank" rel="noopener">Palo Alto Networks: URL Filtering Log Fields (current NGFW docs)</a></li>
+    <li><a href="https://docs.paloaltonetworks.com/pan-os/10-1/pan-os-admin/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/threat-log-fields" target="_blank" rel="noopener">Palo Alto Networks: Threat Log Fields, PAN-OS 10.1 (same layout as URL logs)</a></li>
+    <li><a href="https://docs.paloaltonetworks.com/pan-os/10-2/pan-os-admin/monitoring/use-syslog-for-monitoring/syslog-field-descriptions/data-filtering-log-fields" target="_blank" rel="noopener">Palo Alto Networks: Data Filtering Log Fields, PAN-OS 10.2 (same layout)</a></li>
+    <li><a href="https://docs.paloaltonetworks.com/advanced-url-filtering/administration/monitoring/http-header-logging" target="_blank" rel="noopener">Palo Alto Networks: HTTP Header Logging</a></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/data-collection-transformations-kql" target="_blank" rel="noopener">Microsoft Learn: Supported KQL features in transformations</a></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/logs/create-custom-table" target="_blank" rel="noopener">Microsoft Learn: Add or delete custom columns (the CLI replaces the column list)</a></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/data-collection-rule-create-edit" target="_blank" rel="noopener">Microsoft Learn: Create and edit DCRs</a></li>
+  </ul>
+</section>
+
+</main>
+</div>
+
+<script>
+(function () {
+  // Copy buttons: clipboard inside the click handler, select the text if the clipboard is refused.
+  document.querySelectorAll('.code').forEach(function (block) {
+    var btn = block.querySelector('.copy');
+    var codeEl = block.querySelector('pre code');
+    if (!btn || !codeEl) return;
+    btn.addEventListener('click', function () {
+      var text = codeEl.textContent;
+      function show(label) {
+        btn.textContent = label;
+        btn.setAttribute('data-state', 'done');
+        clearTimeout(btn._t);
+        btn._t = setTimeout(function () { btn.textContent = 'Copy'; btn.removeAttribute('data-state'); }, 1800);
+      }
+      function selectInstead() {
+        try {
+          var range = document.createRange();
+          range.selectNodeContents(codeEl);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (e) {}
+        show('Selected');
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { show('Copied'); }, selectInstead);
+        } else {
+          selectInstead();
+        }
+      } catch (e) {
+        selectInstead();
+      }
+    });
+  });
+
+  // Step ticks: remembered per browser; the page works the same without storage.
+  var KEY = 'pa-url-parser-v1';
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { state = {}; }
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.done-toggle input[type="checkbox"]'));
+  function render() {
+    var done = 0;
+    boxes.forEach(function (box) {
+      var n = box.getAttribute('data-step');
+      var section = document.getElementById('step-' + n);
+      var link = document.querySelector('.toc a[data-step="' + n + '"]');
+      if (section) section.classList.toggle('is-done', box.checked);
+      if (link) link.classList.toggle('is-done', box.checked);
+      if (box.checked) done += 1;
+    });
+    document.getElementById('progress-count').textContent = String(done);
+    document.getElementById('progress-fill').style.width = (done / boxes.length * 100) + '%';
+  }
+  boxes.forEach(function (box) {
+    if (state[box.id]) box.checked = true;
+    box.addEventListener('change', function () {
+      state[box.id] = box.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+      render();
+    });
+  });
+  render();
+
+  // Rail: mark the step being read.
+  var links = {};
+  document.querySelectorAll('.toc a[href^="#"]').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var a = links[entry.target.id];
+        if (!a) return;
+        Object.keys(links).forEach(function (k) { links[k].removeAttribute('aria-current'); });
+        a.setAttribute('aria-current', 'true');
+      });
+    }, { rootMargin: '0px 0px -70% 0px' });
+    document.querySelectorAll('main section[id]').forEach(function (s) { observer.observe(s); });
+  }
+})();
+</script>
+
+</body></html>
